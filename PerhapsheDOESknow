@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + Session Save File Engine)
+-- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + Auto Session Save)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -76,6 +76,7 @@ local function loadProfileData()
 	print("[FEX Storage Engine]: No cloud save profile found or API down. Generating blank layout workspace.")
 end
 
+-- Force load current player configuration immediately
 loadProfileData()
 
 -- ====================================================================
@@ -455,7 +456,7 @@ local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, -180, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "MODEL CONFIGURATION & CLOUD PERSISTENCE PANEL"
+TitleLabel.Text = "MODEL CONFIGURATION & AUTOMATIC PERSISTENCE PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 12
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -481,7 +482,7 @@ ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
 ItemSelectionPanel.ScrollBarThickness = 3
 ItemSelectionPanel.Parent = MainFrame
 
--- Fix: Enable dynamic canvas resizing to prevent bouncing/clipping on mobile screens
+-- UI Dynamic Canvas Auto-Size Setup (Resolves the scale Z cutting box issue)
 local EditorScroll = Instance.new("ScrollingFrame")
 EditorScroll.Size = UDim2.new(0, 165, 1, -100)
 EditorScroll.Position = UDim2.new(0, 265, 0, 40)
@@ -492,7 +493,6 @@ EditorScroll.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
 EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 EditorScroll.Parent = MainFrame
 
--- Scrolling layout controller matching strict alignment guidelines
 local EditorListLayout = Instance.new("UIListLayout")
 EditorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 EditorListLayout.Padding = UDim.new(0, 5)
@@ -605,7 +605,6 @@ compSelectBtn.TextSize = 11
 compSelectBtn.LayoutOrder = 1
 compSelectBtn.Parent = EditorScroll
 
--- Dropdown container layout wrapping
 local dropDownWrapper = Instance.new("Frame")
 dropDownWrapper.Size = UDim2.new(1, 0, 0, 100)
 dropDownWrapper.BackgroundTransparency = 1
@@ -675,7 +674,6 @@ local function createMatrixInput(labelText, property, orderingIndex)
 	inputs[property] = textBox
 end
 
--- Layout order configuration indices mapping out structural sequence lines cleanly
 createMatrixInput("Offset X:", "offsetX", 10)
 createMatrixInput("Offset Y:", "offsetY", 11)
 createMatrixInput("Offset Z:", "offsetZ", 12)
@@ -928,4 +926,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Guns...?")
+print("Hello world")
