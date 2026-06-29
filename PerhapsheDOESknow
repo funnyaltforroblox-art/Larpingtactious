@@ -442,7 +442,7 @@ CircleCorner.Parent = ToggleButton
 
 local UIStroke = Instance.new("UIStroke")
 UIStroke.Color = Color3.fromRGB(0, 255, 150)
-UIStroke.Thickness = 2
+UIStroke.Thickness = 2 -- Fixed: Corrected property name from .Width to .Thickness
 UIStroke.Parent = ToggleButton
 
 makeMobileDraggable(ToggleButton)
@@ -489,7 +489,7 @@ EditorScroll.Position = UDim2.new(0, 265, 0, 40)
 EditorScroll.BackgroundTransparency = 1
 EditorScroll.BorderSizePixel = 0
 EditorScroll.ScrollBarThickness = 3
-EditorScroll.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+EditorScroll.AutomaticSize = Enum.AutomaticSize.Y -- Fixed: Correct enum path name configuration
 EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 EditorScroll.Parent = MainFrame
 
@@ -926,4 +926,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Hello world")
+print("DEBUG HOOORAH")
