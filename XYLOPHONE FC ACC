@@ -21,14 +21,13 @@ local function ensureSubFolder(name)
 	end
 end
 
--- Pre-build all 5 folders natively
 ensureSubFolder("face acc")
 ensureSubFolder("MinorDamage")
 ensureSubFolder("MediumDamage")
 ensureSubFolder("MajorDamage")
 ensureSubFolder("CriticalDamage")
 
--- Default configuration settings and pointer registers
+-- Default configuration settings
 local Config = {
 	SelectedDefault  = "face acc",      -- 100% Health
 	SelectedMinor    = "MinorDamage",   -- Under 75% Health
@@ -153,7 +152,6 @@ local function monitorHealth(character)
 		local ratio = human.Health / human.MaxHealth
 		local target = Config.SelectedDefault
 		
-		-- Evaluates downward through the new 5-tier setup
 		if ratio <= 0.15 then
 			target = Config.SelectedCritical
 		elseif ratio <= 0.30 then
@@ -243,7 +241,7 @@ UIStroke.Parent = ToggleButton
 
 makeMobileDraggable(ToggleButton)
 
--- Main Config UI Window (Expanded height to 310 to fit new entries gracefully)
+-- Main Config UI Window
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 300, 0, 310)
@@ -325,7 +323,6 @@ local function createConfigRow(labelText, placeholderText, tierName, order)
 	end)
 end
 
--- Rendered rows layout supporting the full 5-tier scaling chain
 createConfigRow("Full Health:", "face acc", "Default", 1)
 createConfigRow("Minor Damage:", "MinorDamage", "Minor", 2)
 createConfigRow("Medium Damage:", "MediumDamage", "Medium", 3)
@@ -333,9 +330,12 @@ createConfigRow("Major Damage:", "MajorDamage", "Major", 4)
 createConfigRow("Critical Damage:", "CriticalDamage", "Critical", 5)
 
 -- ====================================================================
--- INITIALIZATION HOOKS
+-- INITIALIZATION HOOKS & CONSOLE OUTPUT
 -- ====================================================================
 if LocalPlayer.Character then
 	task.spawn(monitorHealth, LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
+
+-- Console print confirmation
+print("Util Loaded")
