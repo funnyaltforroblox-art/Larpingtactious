@@ -1,12 +1,33 @@
+-- Health-Based Face & Model Customizer (Sub-Component Offsets & Uniform Scaling Engine)
+repeat task.wait() until game:IsLoaded()
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
-print("[FEX Debug] Running optimized UI layer...")
+-- ====================================================================
+-- COMPONENT DATABASE STRUCTURE (Your Core Customization Layout)
+-- ====================================================================
+-- Each folder tier now supports multiple custom objects, with unique offsets 
+-- for individual Sub-Parts (e.g., Handle, Component_1, etc.)
+local Config = {
+	SelectedDefault  = "face acc",      -- 100% Health Folder Name
+	SelectedMinor    = "MinorDamage",   -- <= 75% Health Folder Name
+	SelectedMedium   = "MediumDamage",  -- <= 50% Health Folder Name
+	SelectedMajor    = "MajorDamage",   -- <= 30% Health Folder Name
+	SelectedCritical = "CriticalDamage" -- <= 15% Health Folder Name
+}
+
+-- Central memory database to look up structural edits for specific tier items
+-- Format: CustomOffsets[TierName][ItemName][SubPartName] = {offsets...}
+local CustomOffsets = {}
+
+local lastPreset = ""
+local activeClientInstances = {}
 
 -- ====================================================================
--- AUTOMATIC FOLDER CREATION LAYER
+-- DIRECTORY SETUP LAYER
 -- ====================================================================
 local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
 if not TargetPresetFolder then
@@ -28,43 +49,159 @@ local function ensureSubFolder(name)
 		local subFolder = Instance.new("Folder")
 		subFolder.Name = name
 		subFolder.Parent = TargetPresetFolder
+		CustomOffsets[name] = {}
 	end
 end
 
-ensureSubFolder("face acc")
-ensureSubFolder("MinorDamage")
-ensureSubFolder("MediumDamage")
-ensureSubFolder("MajorDamage")
-ensureSubFolder("CriticalDamage")
+ensureSubFolder(Config.SelectedDefault)
+ensureSubFolder(Config.SelectedMinor)
+ensureSubFolder(Config.SelectedMedium)
+ensureSubFolder(Config.SelectedMajor)
+ensureSubFolder(Config.SelectedCritical)
 
-local Config = {
-	SelectedDefault  = "face acc",
-	SelectedMinor    = "MinorDamage",
-	SelectedMedium   = "MediumDamage",
-	SelectedMajor    = "MajorDamage",
-	SelectedCritical = "CriticalDamage"
-}
-
-local lastPreset = ""
-local activeClientInstances = {}
-
--- ====================================================================
--- CORE ATTACHMENT / CLEANUP ENGINE
--- ====================================================================
-
-local function registerPreset(tier, newFolderName)
-	ensureSubFolder(newFolderName)
-	if tier == "Default" then Config.SelectedDefault = newFolderName
-	elseif tier == "Minor" then Config.SelectedMinor = newFolderName
-	elseif tier == "Medium" then Config.SelectedMedium = newFolderName
-	elseif tier == "Major" then Config.SelectedMajor = newFolderName
-	elseif tier == "Critical" then Config.SelectedCritical = newFolderName end
+-- Helper initialization function to map data schemas to items discovered inside the folders
+local function initializeItemData(tierName, item)
+	if not CustomOffsets[tierName] then CustomOffsets[tierName] = {} end
+	if CustomOffsets[tierName][item.Name] then return end -- Already initialized
 	
-	lastPreset = "" 
-	if LocalPlayer.Character then
-		local human = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if human then human.Health = human.Health end
+	local itemProfile = {}
+	
+	-- Locate primary handles
+	local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart", true)
+	if not handle and item:IsA("Model") and item.PrimaryPart then handle = item.PrimaryPart end
+	
+	if handle then
+		handle.Name = "Handle"
+		itemProfile["Handle"] = {offsetX = 0, offsetY = 0, offsetZ = 0, rotateX = 0, rotateY = 0, rotateZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1}
+		
+		local partCounter = 1
+		for _, child in ipairs(item:GetDescendants()) do
+			if child:IsA("BasePart") and child ~= handle then
+				if child.Name == "Part" or child.Name == "MeshPart" or child.Name == "" then
+					child.Name = "Component_" .. tostring(partCounter)
+					partCounter = partCounter + 1
+				end
+				
+				local defaultX, defaultY, defaultZ = 1, 1, 1
+				local mesh = child:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh then
+					defaultX, defaultY, defaultZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
+				else
+					defaultX, defaultY, defaultZ = child.Size.X, child.Size.Y, child.Size.Z
+				end
+				
+				itemProfile[child.Name] = {
+					offsetX = 0, offsetY = 0, offsetZ = 0,
+					rotateX = 0, rotateY = 0, rotateZ = 0,
+					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ
+				}
+			end
+		end
 	end
+	CustomOffsets[tierName][item.Name] = itemProfile
+end
+
+-- ====================================================================
+-- POSITIONING, SCALING & ATTACHMENT CORE PIPELINE
+-- ====================================================================
+local function localAttach(character, tierName, item)
+	local head = character:WaitForChild("Head", 5)
+	if not head then return end
+	
+	-- Build internal layout data for the source asset first
+	initializeItemData(tierName, item)
+	local itemData = CustomOffsets[tierName][item.Name]
+	
+	local clone = item:Clone()
+	local handle = clone.Name == "Handle" and clone or clone:FindFirstChild("Handle") or clone:FindFirstChildWhichIsA("BasePart", true)
+	if not handle and clone:IsA("Model") and clone.PrimaryPart then handle = clone.PrimaryPart end
+	if not handle then return end
+	
+	handle.Name = "Handle"
+	
+	-- Clean out game joints inside asset code blocks
+	for _, child in ipairs(clone:GetDescendants()) do
+		if child:IsA("Weld") or child:IsA("ManualWeld") or child:IsA("WeldConstraint") or child:IsA("Attachment") then
+			child:Destroy()
+		end
+	end
+	
+	-- 1. Apply scaling and inner sub-weld configurations if model contains components
+	local structuralOffsets = {}
+	local partCounter = 1
+	
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") and obj ~= handle then
+			if obj.Name == "Part" or obj.Name == "MeshPart" or obj.Name == "" then
+				obj.Name = "Component_" .. tostring(partCounter)
+				partCounter = partCounter + 1
+			end
+			
+			structuralOffsets[obj.Name] = handle.CFrame:ToObjectSpace(obj.CFrame)
+			obj.Anchored = false; obj.CanCollide = false; obj.Massless = true
+			
+			local pData = itemData[obj.Name]
+			if pData then
+				local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh then
+					mesh.Scale = Vector3.new(pData.scaleX, pData.scaleY, pData.scaleZ)
+				else
+					obj.Size = Vector3.new(pData.scaleX, pData.scaleY, pData.scaleZ)
+				end
+			end
+		end
+	end
+	
+	-- Handle base element adjustments
+	handle.Anchored = false; handle.CanCollide = false; handle.Massless = true
+	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1}
+	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
+	if rootMesh then
+		rootMesh.Scale = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
+	else
+		handle.Size = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
+	end
+
+	-- 2. Construct inner structural rigid matrices (Weld mapping)
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") and obj ~= handle then
+			local pData = itemData[obj.Name] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0}
+			local innerWeld = Instance.new("Weld")
+			innerWeld.Name = "ModelInnerWeld"
+			innerWeld.Part0 = obj
+			innerWeld.Part1 = handle
+			
+			local originalLocalCFrame = structuralOffsets[obj.Name] or CFrame.new()
+			local customPosOffset = CFrame.new(pData.offsetX, pData.offsetY, pData.offsetZ)
+			local customRotOffset = CFrame.Angles(math.rad(pData.rotateX), math.rad(pData.rotateY), math.rad(pData.rotateZ))
+			
+			innerWeld.C0 = originalLocalCFrame:Inverse() * (customPosOffset * customRotOffset)
+			innerWeld.Parent = obj
+		end
+	end
+
+	-- 3. Parent to character and apply root attachment weld to Head
+	local accessory = clone:IsA("Accessory") and clone or Instance.new("Accessory")
+	if not clone:IsA("Accessory") then
+		accessory.Name = "CustomAttachedAsset"
+		clone.Parent = accessory
+	else
+		accessory.Name = clone.Name
+	end
+	
+	local rootWeld = Instance.new("Weld")
+	rootWeld.Name = "AccessoryWeld"
+	rootWeld.Part0 = handle
+	rootWeld.Part1 = head
+	
+	local positionOffset = CFrame.new(rootData.offsetX, rootData.offsetY, rootData.offsetZ)
+	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX), math.rad(rootData.rotateY), math.rad(rootData.rotateZ))
+	
+	rootWeld.C0 = positionOffset * rotationOffset
+	rootWeld.Parent = handle
+	
+	accessory.Parent = character
+	table.insert(activeClientInstances, accessory)
 end
 
 local function clearActiveItems()
@@ -74,85 +211,21 @@ local function clearActiveItems()
 	activeClientInstances = {}
 end
 
-local function localAttach(character, item)
-	local head = character:WaitForChild("Head", 5)
-	if not head then return end
-	local clone = item:Clone()
-	
-	if clone:IsA("Accessory") then
-		local handle = clone:FindFirstChild("Handle")
-		if handle and handle:IsA("BasePart") then
-			local accAttachment = handle:FindFirstChildOfClass("Attachment")
-			if accAttachment then
-				local charAttachment = character:FindFirstChild(accAttachment.Name, true)
-				if charAttachment and charAttachment:IsA("Attachment") then
-					handle.CFrame = charAttachment.WorldCFrame * accAttachment.CFrame:Inverse()
-					local weld = Instance.new("Weld")
-					weld.Part0 = handle; weld.Part1 = charAttachment.Parent
-					weld.C0 = accAttachment.CFrame; weld.C1 = charAttachment.CFrame
-					weld.Parent = handle
-				end
-			else
-				handle.CFrame = head.CFrame
-				local weld = Instance.new("WeldConstraint")
-				weld.Part0 = handle; weld.Part1 = head; weld.Parent = handle
-			end
-			clone.Parent = character
-			table.insert(activeClientInstances, clone)
-		end
-	elseif clone:IsA("Model") then
-		local primary = clone.PrimaryPart or clone:FindFirstChildWhichIsA("BasePart", true)
-		if primary then
-			clone:SetPrimaryPartCFrame(head.CFrame)
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = primary; weld.Part1 = head; weld.Parent = primary
-			for _, part in ipairs(clone:GetDescendants()) do
-				if part:IsA("BasePart") and part ~= primary then
-					local innerWeld = Instance.new("WeldConstraint")
-					innerWeld.Part0 = part; innerWeld.Part1 = primary; innerWeld.Parent = part
-					part.CanCollide = false
-				end
-			end
-			clone.Parent = character
-			table.insert(activeClientInstances, clone)
-		end
-	elseif clone:IsA("BasePart") or clone:IsA("MeshPart") then
-		clone.CFrame = head.CFrame
-		clone.CanCollide = false; clone.Massless = true
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = clone; weld.Part1 = head; weld.Parent = clone
-		clone.Parent = character
-		table.insert(activeClientInstances, clone)
-	end
-end
-
-local function stripGameFaceAccessories(character)
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Accessory") then
-			local handle = child:FindFirstChild("Handle")
-			if handle then
-				local attachment = handle:FindFirstChildOfClass("Attachment")
-				if attachment and string.find(attachment.Name, "Face") then
-					child:Destroy()
-				end
-			end
-		end
-	end
-end
-
 local function applyPreset(character, folderName)
 	clearActiveItems()
 	if folderName == "" or folderName == "None" then return end
 	
-	stripGameFaceAccessories(character)
 	local folder = TargetPresetFolder:FindFirstChild(folderName)
 	if not folder then return end
 	
 	for _, item in ipairs(folder:GetChildren()) do
-		task.spawn(localAttach, character, item)
+		task.spawn(localAttach, character, folderName, item)
 	end
 end
 
+-- ====================================================================
+-- HEALTH DETECTOR MONITOR LOOP
+-- ====================================================================
 local function monitorHealth(character)
 	local human = character:WaitForChild("Humanoid")
 	
@@ -176,174 +249,6 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
--- ROBUST MOBILE DRAG ENGINE
--- ====================================================================
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FaceAccMobileUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-local uiParented = false
-pcall(function()
-	if game:GetService("CoreGui") then
-		ScreenGui.Parent = game:GetService("CoreGui")
-		uiParented = true
-	end
-end)
-if not uiParented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-local function makeMobileDraggable(guiObject)
-	local dragging = false
-	local dragInput, dragStart, startPos
-
-	guiObject.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = guiObject.Position
-			
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
-			end)
-		end
-	end)
-
-	guiObject.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-			dragInput = input
-		end
-	end)
-
-	UserInputService.InputChanged:Connect(function(input)
-		if input == dragInput and dragging then
-			local delta = input.Position - dragStart
-			guiObject.Position = UDim2.new(
-				startPos.X.Scale, startPos.X.Offset + delta.X, 
-				startPos.Y.Scale, startPos.Y.Offset + delta.Y
-			)
-		end
-	end)
-end
-
--- Main Config UI Window
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 310)
-MainFrame.Position = UDim2.new(0.5, -150, 0.4, -155)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = false
-MainFrame.Active = true
-MainFrame.Parent = ScreenGui
-
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 12)
-MainCorner.Parent = MainFrame
-
-makeMobileDraggable(MainFrame)
-
--- Circular FEX Toggle Button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "FEXToggle"
-ToggleButton.Size = UDim2.new(0, 60, 0, 60)
-ToggleButton.Position = UDim2.new(0.1, 0, 0.3, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-ToggleButton.BorderSizePixel = 0
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.Text = "FEX"
-ToggleButton.TextColor3 = Color3.fromRGB(0, 255, 150)
-ToggleButton.TextSize = 16
-ToggleButton.Active = true
-ToggleButton.Parent = ScreenGui
-
-local CircleCorner = Instance.new("UICorner")
-CircleCorner.CornerRadius = UDim.new(1, 0)
-CircleCorner.Parent = ToggleButton
-
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Color = Color3.fromRGB(0, 255, 150)
-UIStroke.Thickness = 2 -- FIX: Changed from Width to Thickness
-UIStroke.Parent = ToggleButton
-
-makeMobileDraggable(ToggleButton)
-
-ToggleButton.Activated:Connect(function()
-	MainFrame.Visible = not MainFrame.Visible
-end)
-
--- Window Title Header
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, 0, 0, 40)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "FACE ACC CONFIG"
-TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
-TitleLabel.TextSize = 13
-TitleLabel.Parent = MainFrame
-
--- Rows Container
-local Container = Instance.new("Frame")
-Container.Size = UDim2.new(1, -20, 1, -50)
-Container.Position = UDim2.new(0, 10, 0, 45)
-Container.BackgroundTransparency = 1
-Container.Parent = MainFrame
-
-local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 8)
-Layout.SortOrder = Enum.SortOrder.LayoutOrder
-Layout.Parent = Container
-
-local function createConfigRow(labelText, placeholderText, tierName, order)
-	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 42)
-	row.BackgroundTransparency = 1
-	row.LayoutOrder = order
-	row.Parent = Container
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 110, 1, 0)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamSemibold
-	label.Text = labelText
-	label.TextColor3 = Color3.fromRGB(170, 170, 180)
-	label.TextSize = 11
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = row
-
-	local textBox = Instance.new("TextBox")
-	textBox.Size = UDim2.new(1, -120, 0, 32)
-	textBox.Position = UDim2.new(0, 120, 0, 5)
-	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-	textBox.BorderSizePixel = 0
-	textBox.Font = Enum.Font.Gotham
-	textBox.PlaceholderText = placeholderText
-	textBox.Text = placeholderText
-	textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-	textBox.TextSize = 11
-	textBox.ClearTextOnFocus = false
-	
-	local boxCorner = Instance.new("UICorner")
-	boxCorner.CornerRadius = UDim.new(0, 6)
-	boxCorner.Parent = textBox
-	textBox.Parent = row
-
-	textBox.FocusLost:Connect(function()
-		if textBox.Text ~= "" then
-			registerPreset(tierName, textBox.Text)
-		end
-	end)
-end
-
-createConfigRow("Full Health:", "face acc", "Default", 1)
-createConfigRow("Minor Damage:", "MinorDamage", "Minor", 2)
-createConfigRow("Medium Damage:", "MediumDamage", "Medium", 3)
-createConfigRow("Major Damage:", "MajorDamage", "Major", 4)
-createConfigRow("Critical Damage:", "CriticalDamage", "Critical", 5)
-
--- ====================================================================
 -- INITIALIZATION HOOKS
 -- ====================================================================
 if LocalPlayer.Character then
@@ -351,4 +256,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Lets get lit")
+print("Oh again?")
