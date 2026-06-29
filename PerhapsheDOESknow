@@ -1,11 +1,21 @@
--- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB & Saturation Slider Engine)
+-- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + Session Save File Engine)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService")
+
 local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
+
+-- Global Storage Identification Tag
+local DATA_STORE_KEY = "FEX_Customizer_Save_V1"
+local SaveDataStore = nil
+pcall(function()
+	SaveDataStore = DataStoreService:GetDataStore(DATA_STORE_KEY)
+end)
 
 -- ====================================================================
 -- CONFIGURATION & CENTRAL STORAGE LAYOUT
@@ -26,6 +36,47 @@ local selectedTierName = Config.SelectedDefault
 local selectedItemName = ""
 local selectedSubPartName = "Handle"
 local currentHighlightBox = nil
+
+-- ====================================================================
+-- GLOBAL SAVE / LOAD SYSTEM SERIALIZATION
+-- ====================================================================
+local function saveProfileData()
+	if not SaveDataStore then return end
+	local userId = tostring(LocalPlayer.UserId)
+	
+	task.spawn(function()
+		local success, err = pcall(function()
+			local jsonString = HttpService:JSONEncode(CustomOffsets)
+			SaveDataStore:SetAsync(userId, jsonString)
+		end)
+		if not success then
+			warn("[FEX Save Warning]: Failed to commit profile to cloud storage: " .. tostring(err))
+		end
+	end)
+end
+
+local function loadProfileData()
+	if not SaveDataStore then return end
+	local userId = tostring(LocalPlayer.UserId)
+	
+	local success, result = pcall(function()
+		return SaveDataStore:GetAsync(userId)
+	end)
+	
+	if success and result and type(result) == "string" then
+		local successParse, parsedData = pcall(function()
+			return HttpService:JSONDecode(result)
+		end)
+		if successParse and type(parsedData) == "table" then
+			CustomOffsets = parsedData
+			print("[FEX Storage Engine]: Successfully loaded custom profile presets.")
+			return
+		end
+	end
+	print("[FEX Storage Engine]: No cloud save profile found or API down. Generating blank layout workspace.")
+end
+
+loadProfileData()
 
 -- ====================================================================
 -- DIRECTORY SETUP LAYER
@@ -105,6 +156,7 @@ local function initializeItemData(tierName, item)
 		end
 	end
 	CustomOffsets[tierName][item.Name] = itemProfile
+	saveProfileData()
 end
 
 -- ====================================================================
@@ -286,10 +338,10 @@ local function applyPreset(character, folderName)
 end
 
 local function monitorHealth(character)
-	local human = character:WaitForChild("Humanoid")
+	local humanoid = character:WaitForChild("Humanoid")
 	
 	local function check()
-		local ratio = human.Health / human.MaxHealth
+		local ratio = humanoid.Health / humanoid.MaxHealth
 		local target = Config.SelectedDefault
 		
 		if ratio <= 0.15 then target = Config.SelectedCritical
@@ -303,7 +355,7 @@ local function monitorHealth(character)
 		end
 	end
 	
-	human.HealthChanged:Connect(check)
+	humanoid.HealthChanged:Connect(check)
 	check()
 end
 
@@ -354,7 +406,6 @@ local function makeMobileDraggable(guiObject)
 	end)
 end
 
--- Main Adjuster Framework Layout (Expanded to fit the Color Panel at top-right)
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 610, 0, 320)
@@ -371,7 +422,6 @@ MainCorner.Parent = MainFrame
 
 makeMobileDraggable(MainFrame)
 
--- Circular Toggle Activation Button
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "FEXToggle"
 ToggleButton.Size = UDim2.new(0, 60, 0, 60)
@@ -405,7 +455,7 @@ local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, -180, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "MODEL CONFIGURATION & COLOR MATRIX PANEL"
+TitleLabel.Text = "MODEL CONFIGURATION & CLOUD PERSISTENCE PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 12
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -431,16 +481,23 @@ ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
 ItemSelectionPanel.ScrollBarThickness = 3
 ItemSelectionPanel.Parent = MainFrame
 
+-- Fix: Enable dynamic canvas resizing to prevent bouncing/clipping on mobile screens
 local EditorScroll = Instance.new("ScrollingFrame")
 EditorScroll.Size = UDim2.new(0, 165, 1, -100)
 EditorScroll.Position = UDim2.new(0, 265, 0, 40)
 EditorScroll.BackgroundTransparency = 1
 EditorScroll.BorderSizePixel = 0
-EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 340)
 EditorScroll.ScrollBarThickness = 3
+EditorScroll.AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y
+EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 EditorScroll.Parent = MainFrame
 
--- Top Right RGB Matrix Canvas Panel
+-- Scrolling layout controller matching strict alignment guidelines
+local EditorListLayout = Instance.new("UIListLayout")
+EditorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+EditorListLayout.Padding = UDim.new(0, 5)
+EditorListLayout.Parent = EditorScroll
+
 local ColorPanel = Instance.new("Frame")
 ColorPanel.Name = "ColorPanel"
 ColorPanel.Size = UDim2.new(0, 160, 0, 165)
@@ -540,42 +597,54 @@ end)
 -- Component Sub-Dropdown Target
 local compSelectBtn = Instance.new("TextButton")
 compSelectBtn.Size = UDim2.new(1, 0, 0, 26)
-compSelectBtn.Position = UDim2.new(0, 0, 0, 0)
 compSelectBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 45)
 compSelectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 compSelectBtn.Text = "Part: Handle"
 compSelectBtn.Font = Enum.Font.GothamBold
 compSelectBtn.TextSize = 11
+compSelectBtn.LayoutOrder = 1
 compSelectBtn.Parent = EditorScroll
 
+-- Dropdown container layout wrapping
+local dropDownWrapper = Instance.new("Frame")
+dropDownWrapper.Size = UDim2.new(1, 0, 0, 100)
+dropDownWrapper.BackgroundTransparency = 1
+dropDownWrapper.Visible = false
+dropDownWrapper.LayoutOrder = 2
+dropDownWrapper.Parent = EditorScroll
+
 local compDropdownScroll = Instance.new("ScrollingFrame")
-compDropdownScroll.Size = UDim2.new(1, 0, 0, 100)
-compDropdownScroll.Position = UDim2.new(0, 0, 0, 28)
+compDropdownScroll.Size = UDim2.new(1, 0, 1, 0)
 compDropdownScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-compDropdownScroll.ZIndex = 5
-compDropdownScroll.Visible = false
-compDropdownScroll.Parent = EditorScroll
+compDropdownScroll.BorderSizePixel = 0
+compDropdownScroll.ScrollBarThickness = 3
+compDropdownScroll.Parent = dropDownWrapper
 
 compSelectBtn.Activated:Connect(function()
-	compDropdownScroll.Visible = not compDropdownScroll.Visible
+	dropDownWrapper.Visible = not dropDownWrapper.Visible
 end)
 
 local inputs = {}
-local function createMatrixInput(labelText, property, yPos)
+local function createMatrixInput(labelText, property, orderingIndex)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(1, 0, 0, 24)
+	container.BackgroundTransparency = 1
+	container.LayoutOrder = orderingIndex
+	container.Parent = EditorScroll
+
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 70, 0, 22)
-	label.Position = UDim2.new(0, 0, 0, yPos)
+	label.Size = UDim2.new(0, 70, 1, 0)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamSemibold
 	label.Text = labelText
 	label.TextColor3 = Color3.fromRGB(170, 170, 180)
 	label.TextSize = 11
 	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = EditorScroll
+	label.Parent = container
 
 	local textBox = Instance.new("TextBox")
-	textBox.Size = UDim2.new(1, -75, 0, 22)
-	textBox.Position = UDim2.new(0, 75, 0, yPos)
+	textBox.Size = UDim2.new(1, -75, 1, 0)
+	textBox.Position = UDim2.new(0, 75, 0, 0)
 	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 	textBox.BorderSizePixel = 0
 	textBox.Font = Enum.Font.Gotham
@@ -587,7 +656,7 @@ local function createMatrixInput(labelText, property, yPos)
 	local boxCorner = Instance.new("UICorner")
 	boxCorner.CornerRadius = UDim.new(0, 4)
 	boxCorner.Parent = textBox
-	textBox.Parent = EditorScroll
+	textBox.Parent = container
 
 	textBox.FocusLost:Connect(function()
 		if selectedItemName == "" then return end
@@ -599,21 +668,23 @@ local function createMatrixInput(labelText, property, yPos)
 				if LocalPlayer.Character then
 					applyPreset(LocalPlayer.Character, lastPreset)
 				end
+				saveProfileData()
 			end
 		end
 	end)
 	inputs[property] = textBox
 end
 
-createMatrixInput("Offset X:", "offsetX", 140)
-createMatrixInput("Offset Y:", "offsetY", 165)
-createMatrixInput("Offset Z:", "offsetZ", 190)
-createMatrixInput("Rotate X:", "rotateX", 215)
-createMatrixInput("Rotate Y:", "rotateY", 240)
-createMatrixInput("Rotate Z:", "rotateZ", 265)
-createMatrixInput("Scale X:",  "scaleX",  290)
-createMatrixInput("Scale Y:",  "scaleY",  315)
-createMatrixInput("Scale Z:",  "scaleZ",  340)
+-- Layout order configuration indices mapping out structural sequence lines cleanly
+createMatrixInput("Offset X:", "offsetX", 10)
+createMatrixInput("Offset Y:", "offsetY", 11)
+createMatrixInput("Offset Z:", "offsetZ", 12)
+createMatrixInput("Rotate X:", "rotateX", 13)
+createMatrixInput("Rotate Y:", "rotateY", 14)
+createMatrixInput("Rotate Z:", "rotateZ", 15)
+createMatrixInput("Scale X:",  "scaleX",  16)
+createMatrixInput("Scale Y:",  "scaleY",  17)
+createMatrixInput("Scale Z:",  "scaleZ",  18)
 
 -- ====================================================================
 -- SLIDER CREATION ENGINE (RGB & SATURATION)
@@ -683,7 +754,10 @@ local function createColorSlider(name, color, yPos, min, max)
 
 	UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			activeSliding = false
+			if activeSliding then
+				activeSliding = false
+				saveProfileData()
+			end
 		end
 	end)
 
@@ -749,7 +823,7 @@ updateEditorUI = function()
 		
 		rBtn.Activated:Connect(function()
 			selectedSubPartName = pName
-			compDropdownScroll.Visible = false
+			dropDownWrapper.Visible = false
 			updateEditorUI()
 			highlightSelectedSubPart()
 		end)
@@ -850,4 +924,8 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Util Loadddddded")
+Players.PlayerRemoving:Connect(function(player)
+	if player == LocalPlayer then saveProfileData() end
+end)
+
+print("Guns...?")
