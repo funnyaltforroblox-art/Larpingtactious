@@ -1,21 +1,16 @@
--- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + Auto Session Save)
+-- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + LOCAL FILE SAVE)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
 
--- Global Storage Identification Tag
-local DATA_STORE_KEY = "FEX_Customizer_Save_V1"
-local SaveDataStore = nil
-pcall(function()
-	SaveDataStore = DataStoreService:GetDataStore(DATA_STORE_KEY)
-end)
+-- Local Workspace File Settings
+local FILE_NAME = "FEX_Customizer_Presets.json"
 
 -- ====================================================================
 -- CONFIGURATION & CENTRAL STORAGE LAYOUT
@@ -38,29 +33,30 @@ local selectedSubPartName = "Handle"
 local currentHighlightBox = nil
 
 -- ====================================================================
--- GLOBAL SAVE / LOAD SYSTEM SERIALIZATION
+-- LOCAL FILE SYSTEM SAVE / LOAD PIPELINE
 -- ====================================================================
 local function saveProfileData()
-	if not SaveDataStore then return end
-	local userId = tostring(LocalPlayer.UserId)
-	
 	task.spawn(function()
 		local success, err = pcall(function()
-			local jsonString = HttpService:JSONEncode(CustomOffsets)
-			SaveDataStore:SetAsync(userId, jsonString)
+			if writefile then
+				local jsonString = HttpService:JSONEncode(CustomOffsets)
+				writefile(FILE_NAME, jsonString)
+			else
+				warn("[FEX Save Warning]: Your executor does not support 'writefile'.")
+			end
 		end)
 		if not success then
-			warn("[FEX Save Warning]: Failed to commit profile to cloud storage: " .. tostring(err))
+			warn("[FEX Save Error]: Failed to write local preset file: " .. tostring(err))
 		end
 	end)
 end
 
 local function loadProfileData()
-	if not SaveDataStore then return end
-	local userId = tostring(LocalPlayer.UserId)
-	
 	local success, result = pcall(function()
-		return SaveDataStore:GetAsync(userId)
+		if readfile and isfile and isfile(FILE_NAME) then
+			return readfile(FILE_NAME)
+		end
+		return nil
 	end)
 	
 	if success and result and type(result) == "string" then
@@ -69,14 +65,14 @@ local function loadProfileData()
 		end)
 		if successParse and type(parsedData) == "table" then
 			CustomOffsets = parsedData
-			print("[FEX Storage Engine]: Successfully loaded custom profile presets.")
+			print("[FEX Local Engine]: Successfully loaded presets from workspace/" .. FILE_NAME)
 			return
 		end
 	end
-	print("[FEX Storage Engine]: No cloud save profile found or API down. Generating blank layout workspace.")
+	print("[FEX Local Engine]: No local file found or fresh setup. Creating clean profile matrix.")
 end
 
--- Force load current player configuration immediately
+-- Force load from local storage file immediately
 loadProfileData()
 
 -- ====================================================================
@@ -482,7 +478,7 @@ ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
 ItemSelectionPanel.ScrollBarThickness = 3
 ItemSelectionPanel.Parent = MainFrame
 
--- UI Canvas Fixed Layout: Bound strictly to absolute elements size map
+-- UI Canvas Dynamic Scrolling Content Box
 local EditorScroll = Instance.new("ScrollingFrame")
 EditorScroll.Size = UDim2.new(0, 165, 1, -100)
 EditorScroll.Position = UDim2.new(0, 265, 0, 40)
@@ -496,7 +492,7 @@ EditorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 EditorListLayout.Padding = UDim.new(0, 5)
 EditorListLayout.Parent = EditorScroll
 
--- Dynamically calculate content space to safely enable scroll bars on mobile
+-- Auto Canvas Size configuration adjustment hook
 EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 15)
 end)
@@ -931,4 +927,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Piegon.")
+print("My head..")
