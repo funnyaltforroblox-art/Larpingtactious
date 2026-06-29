@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 -- CHANGE THIS to the folder path where you keep your preset configurations!
@@ -7,9 +8,8 @@ local TargetPresetFolder = ReplicatedStorage:WaitForChild("FaceAccPresets", 5) o
 
 -- Default configuration settings
 local Config = {
-	MinorThreshold = 0.70, -- 70% Health
-	MajorThreshold = 0.30, -- 30% Health
-	
+	MinorThreshold = 0.70,
+	MajorThreshold = 0.30,
 	SelectedDefault = "face acc",
 	SelectedMinor = "MinorDamage",
 	SelectedMajor = "MajorDamage"
@@ -22,21 +22,15 @@ local activeClientInstances = {}
 -- CORE OVERWRITE & ENGINE FUNCTIONALITY
 -- ====================================================================
 
--- Overwrite function to dynamically assign or update presets safely
 local function registerPreset(tier, newFolderName)
-	if tier == "Default" then
-		Config.SelectedDefault = newFolderName
-	elseif tier == "Minor" then
-		Config.SelectedMinor = newFolderName
-	elseif tier == "Major" then
-		Config.SelectedMajor = newFolderName
-	end
+	if tier == "Default" then Config.SelectedDefault = newFolderName
+	elseif tier == "Minor" then Config.SelectedMinor = newFolderName
+	elseif tier == "Major" then Config.SelectedMajor = newFolderName end
 	
-	-- Force the engine to clear and re-evaluate immediately on overwrite
 	lastPreset = "" 
 	if LocalPlayer.Character then
 		local human = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		if human then human.Health = human.Health end -- Triggers HealthChanged update
+		if human then human.Health = human.Health end
 	end
 end
 
@@ -133,11 +127,8 @@ local function monitorHealth(character)
 		local ratio = human.Health / human.MaxHealth
 		local target = Config.SelectedDefault
 		
-		if ratio <= Config.MajorThreshold then
-			target = Config.SelectedMajor
-		elseif ratio <= Config.MinorThreshold then
-			target = Config.SelectedMinor
-		end
+		if ratio <= Config.MajorThreshold then target = Config.SelectedMajor
+		elseif ratio <= Config.MinorThreshold then target = Config.SelectedMinor end
 		
 		if target ~= lastPreset then
 			lastPreset = target
@@ -150,11 +141,11 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
--- INTERFACE BUILDER (Sleek Dark Theme UI)
+-- MOBILE INTERFACE & DRAG ENGINE
 -- ====================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "FaceAccConfigUI"
+ScreenGui.Name = "FaceAccMobileUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
@@ -164,32 +155,96 @@ local success, err = pcall(function()
 end)
 if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Main Window Frame
+-- Custom Touch Drag Handler (Works perfectly on Mobile Screens)
+local function makeMobileDraggable(frame)
+	local dragging, dragInput, dragStart, startPos
+	
+	frame.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+			
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+	
+	frame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-- Circular FEX Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "FEXToggle"
+ToggleButton.Size = UDim2.new(0, 60, 0, 60)
+ToggleButton.Position = UDim2.new(0.1, 0, 0.2, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+ToggleButton.BorderSizePixel = 0
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.Text = "FEX"
+ToggleButton.TextColor3 = Color3.fromRGB(0, 255, 150)
+ToggleButton.TextSize = 16
+ToggleButton.Active = true
+ToggleButton.Parent = ScreenGui
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0) -- Makes it a perfect circle
+CircleCorner.Parent = ToggleButton
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 255, 150)
+UIStroke.Width = 2
+UIStroke.Parent = ToggleButton
+
+makeMobileDraggable(ToggleButton)
+
+-- Main Config UI Window
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 320, 0, 280)
-MainFrame.Position = UDim2.new(0.5, -160, 0.4, -140)
+MainFrame.Size = UDim2.new(0, 300, 0, 260)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -130)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Draggable = true 
 MainFrame.Parent = ScreenGui
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 10)
-UICorner.Parent = MainFrame
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
 
--- UI Title Header Label
+makeMobileDraggable(MainFrame)
+
+-- Toggle Menu visibility on Button Tap
+ToggleButton.MouseButton1Click:Connect(function()
+	MainFrame.Visible = not MainFrame.Visible
+end)
+
+-- Window Title Header
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 40)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "FACE ACC PRESETS (OVERWRITE)"
+TitleLabel.Text = "FACE ACC CONFIG"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
-TitleLabel.TextSize = 14
+TitleLabel.TextSize = 13
 TitleLabel.Parent = MainFrame
 
--- Container for dropdown entries
+-- Rows Container
 local Container = Instance.new("Frame")
 Container.Size = UDim2.new(1, -20, 1, -50)
 Container.Position = UDim2.new(0, 10, 0, 45)
@@ -197,56 +252,57 @@ Container.BackgroundTransparency = 1
 Container.Parent = MainFrame
 
 local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 15)
+Layout.Padding = UDim.new(0, 12)
 Layout.SortOrder = Enum.SortOrder.LayoutOrder
 Layout.Parent = Container
 
--- Helper function to generate configuration rows
+-- Helper function to generate input configuration rows
 local function createConfigRow(labelText, placeholderText, tierName, order)
 	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 50)
+	row.Size = UDim2.new(1, 0, 0, 45)
 	row.BackgroundTransparency = 1
 	row.LayoutOrder = order
 	row.Parent = Container
 
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 120, 1, 0)
+	label.Size = UDim2.new(0, 110, 1, 0)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamSemibold
 	label.Text = labelText
-	label.TextColor3 = Color3.fromRGB(180, 180, 190)
-	label.TextSize = 12
+	label.TextColor3 = Color3.fromRGB(170, 170, 180)
+	label.TextSize = 11
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Parent = row
 
 	local textBox = Instance.new("TextBox")
-	textBox.Size = UDim2.new(1, -130, 0, 35)
-	textBox.Position = UDim2.new(0, 130, 0, 7)
+	textBox.Size = UDim2.new(1, -120, 0, 32)
+	textBox.Position = UDim2.new(0, 120, 0, 6)
 	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 	textBox.BorderSizePixel = 0
 	textBox.Font = Enum.Font.Gotham
 	textBox.PlaceholderText = placeholderText
 	textBox.Text = placeholderText
 	textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-	textBox.TextSize = 12
+	textBox.TextSize = 11
+	textBox.ClearTextOnFocus = false
 	
 	local boxCorner = Instance.new("UICorner")
 	boxCorner.CornerRadius = UDim.new(0, 6)
 	boxCorner.Parent = textBox
 	textBox.Parent = row
 
-	-- Automatically overwrite preset pointer on text enter
-	textBox.FocusLost:Connect(function(enterPressed)
+	-- Overwrite logic triggers immediately upon editing text on mobile keyboard
+	textBox.FocusLost:Connect(function()
 		if textBox.Text ~= "" then
 			registerPreset(tierName, textBox.Text)
 		end
 	end)
 end
 
--- Build configuration settings rows
-createConfigRow("Full Health Preset:", "face acc", "Default", 1)
-createConfigRow("Minor Damage Preset:", "MinorDamage", "Minor", 2)
-createConfigRow("Major Damage Preset:", "MajorDamage", "Major", 3)
+-- Build mobile interface entry rows
+createConfigRow("Full Health:", "face acc", "Default", 1)
+createConfigRow("Minor Damage:", "MinorDamage", "Minor", 2)
+createConfigRow("Major Damage:", "MajorDamage", "Major", 3)
 
 -- ====================================================================
 -- INITIALIZATION HOOKS
