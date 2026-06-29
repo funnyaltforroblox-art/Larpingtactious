@@ -1,0 +1,180 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- HEALTH THRESHOLDS
+local MINOR_DAMAGE_PCT = 0.70
+local MAJOR_DAMAGE_PCT = 0.30
+
+-- ====================================================================
+-- PRESET STORAGE
+-- You can directly place your pre-cloned objects inside these tables
+-- if they are already stored somewhere in game.Workspace or ReplicatedStorage.
+-- ====================================================================
+local Presets = {
+	["face acc"] = {},    -- Empty = Default Look / Full Health
+	
+	["MinorDamage"] = {
+		-- Example references (Replace with your actual paths):
+		-- game.ReplicatedStorage.FaceItems.Bandages, (Model or Accessory)
+		-- game.Workspace.Storage.ScratchMesh,       (MeshPart)
+	},
+	
+	["MajorDamage"] = {
+		-- Add as many Models, Accessories, or Meshes as you want here
+	}
+}
+-- ====================================================================
+
+local lastPreset = ""
+local activeClientInstances = {}
+
+-- Safely cleans up previously created items
+local function clearActiveItems()
+	for _, item in ipairs(activeClientInstances) do
+		if item and item.Parent then
+			item:Destroy()
+		end
+	end
+	activeClientInstances = {}
+end
+
+-- Custom client-side attachment welding function
+local function localAttach(character, item)
+	local head = character:WaitForChild("Head", 5)
+	if not head then return end
+	
+	local clone = item:Clone()
+	
+	if clone:IsA("Accessory") then
+		-- Handle Standard Accessories via local attachment mapping
+		local handle = clone:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then
+			local accAttachment = handle:FindFirstChildOfClass("Attachment")
+			if accAttachment then
+				local charAttachment = character:FindFirstChild(accAttachment.Name, true)
+				if charAttachment and charAttachment:IsA("Attachment") then
+					handle.CFrame = charAttachment.WorldCFrame * accAttachment.CFrame:Inverse()
+					
+					local weld = Instance.new("Weld")
+					weld.Name = "LocalAccessoryWeld"
+					weld.Part0 = handle
+					weld.Part1 = charAttachment.Parent
+					weld.C0 = accAttachment.CFrame
+					weld.C1 = charAttachment.CFrame
+					weld.Parent = handle
+				end
+			else
+				-- Fallback if accessory lacks an attachment point
+				handle.CFrame = head.CFrame
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = handle
+				weld.Part1 = head
+				weld.Parent = handle
+			end
+			clone.Parent = character
+			table.insert(activeClientInstances, clone)
+		end
+		
+	elseif clone:IsA("Model") then
+		-- Handle Raw Models
+		local primary = clone.PrimaryPart or clone:FindFirstChildWhichIsA("BasePart", true)
+		if primary then
+			clone:SetPrimaryPartCFrame(head.CFrame)
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = primary
+			weld.Part1 = head
+			weld.Parent = primary
+			
+			-- Weld any extra internal parts to the primary part
+			for _, part in ipairs(clone:GetDescendants()) do
+				if part:IsA("BasePart") and part ~= primary then
+					local innerWeld = Instance.new("WeldConstraint")
+					innerWeld.Part0 = part
+					innerWeld.Part1 = primary
+					innerWeld.Parent = part
+					part.CanCollide = false
+				end
+			end
+			clone.Parent = character
+			table.insert(activeClientInstances, clone)
+		end
+		
+	elseif clone:IsA("BasePart") or clone:IsA("MeshPart") then
+		-- Handle Single Meshes / Parts
+		clone.CFrame = head.CFrame
+		clone.CanCollide = false
+		clone.Massless = true
+		
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = clone
+		weld.Part1 = head
+		weld.Parent = clone
+		
+		clone.Parent = character
+		table.insert(activeClientInstances, clone)
+	end
+end
+
+-- Wipes existing game face accessories so they don't clip with presets
+local function stripGameFaceAccessories(character)
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Accessory") then
+			local handle = child:FindFirstChild("Handle")
+			if handle then
+				local attachment = handle:FindFirstChildOfClass("Attachment")
+				if attachment and string.find(attachment.Name, "Face") then
+					child:Destroy()
+				end
+			end
+		end
+	end
+end
+
+-- Applies the target preset array items simultaneously
+local function applyPreset(character, presetName)
+	clearActiveItems()
+	
+	-- Only strip baseline face layout if swapping to a damage preset
+	if presetName ~= "face acc" then
+		stripGameFaceAccessories(character)
+	end
+	
+	local items = Presets[presetName]
+	if not items then return end
+	
+	for _, item in ipairs(items) do
+		if item then
+			task.spawn(localAttach, character, item)
+		end
+	end
+end
+
+-- Tracks Humanoid Health
+local function monitorHealth(character)
+	local human = character:WaitForChild("Humanoid")
+	
+	local function check()
+		local ratio = human.Health / human.MaxHealth
+		local target = "face acc"
+		
+		if ratio <= MAJOR_DAMAGE_PCT then
+			target = "MajorDamage"
+		elseif ratio <= MINOR_DAMAGE_PCT then
+			target = "MinorDamage"
+		end
+		
+		if target ~= lastPreset then
+			lastPreset = target
+			applyPreset(character, target)
+		end
+	end
+	
+	human.HealthChanged:Connect(check)
+	check()
+end
+
+-- Hook execution
+if LocalPlayer.Character then
+	task.spawn(monitorHealth, LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(monitorHealth)
