@@ -3,14 +3,29 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
+print("[FEX Debug] Script initialized...") -- First check point
+
 -- ====================================================================
--- AUTOMATIC FOLDER CREATION LAYER
+-- INSTANT REPLICATED STORAGE COMPATIBILITY LAYER
 -- ====================================================================
+-- Using FindFirstChild to prevent infinite freezing/hanging
 local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
 if not TargetPresetFolder then
-	TargetPresetFolder = Instance.new("Folder")
-	TargetPresetFolder.Name = "FaceAccPresets"
-	TargetPresetFolder.Parent = ReplicatedStorage
+	local success, result = pcall(function()
+		local folder = Instance.new("Folder")
+		folder.Name = "FaceAccPresets"
+		folder.Parent = ReplicatedStorage
+		return folder
+	end)
+	if success then
+		TargetPresetFolder = result
+	else
+		-- Absolute fallback if ReplicatedStorage is completely locked down by game core
+		TargetPresetFolder = Instance.new("Folder")
+		TargetPresetFolder.Name = "FaceAccPresets"
+		TargetPresetFolder.Parent = LocalPlayer:WaitForChild("PlayerGui")
+		print("[FEX Warning] ReplicatedStorage locked. Folders created in PlayerGui instead.")
+	end
 end
 
 local function ensureSubFolder(name)
@@ -27,25 +42,23 @@ ensureSubFolder("MediumDamage")
 ensureSubFolder("MajorDamage")
 ensureSubFolder("CriticalDamage")
 
--- Default configuration settings
 local Config = {
-	SelectedDefault  = "face acc",      -- 100% Health
-	SelectedMinor    = "MinorDamage",   -- Under 75% Health
-	SelectedMedium   = "MediumDamage",  -- Under 50% Health
-	SelectedMajor    = "MajorDamage",   -- Under 30% Health
-	SelectedCritical = "CriticalDamage" -- Under 15% Health
+	SelectedDefault  = "face acc",
+	SelectedMinor    = "MinorDamage",
+	SelectedMedium   = "MediumDamage",
+	SelectedMajor    = "MajorDamage",
+	SelectedCritical = "CriticalDamage"
 }
 
 local lastPreset = ""
 local activeClientInstances = {}
 
 -- ====================================================================
--- OVERWRITE & ENGINE FUNCTIONALITY
+-- CORE ATTACHMENT / CLEANUP ENGINE
 -- ====================================================================
 
 local function registerPreset(tier, newFolderName)
 	ensureSubFolder(newFolderName)
-
 	if tier == "Default" then Config.SelectedDefault = newFolderName
 	elseif tier == "Minor" then Config.SelectedMinor = newFolderName
 	elseif tier == "Medium" then Config.SelectedMedium = newFolderName
@@ -173,7 +186,7 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
--- MOBILE INTERFACE & DRAG ENGINE
+-- SAFE MOBILE INTERFACE PARENTING
 -- ====================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -181,11 +194,18 @@ ScreenGui.Name = "FaceAccMobileUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
-local success, err = pcall(function()
-	if syn and syn.protect_gui then syn.protect_gui(ScreenGui) end
-	ScreenGui.Parent = game:GetService("CoreGui")
+-- Safely try CoreGui. If your engine lacks core permission, force fallback to PlayerGui instantly.
+local uiParented = false
+pcall(function()
+	if game:GetService("CoreGui") then
+		ScreenGui.Parent = game:GetService("CoreGui")
+		uiParented = true
+	end
 end)
-if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+if not uiParented then
+	ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
 
 local function makeMobileDraggable(frame)
 	local dragging, dragInput, dragStart, startPos
@@ -330,12 +350,11 @@ createConfigRow("Major Damage:", "MajorDamage", "Major", 4)
 createConfigRow("Critical Damage:", "CriticalDamage", "Critical", 5)
 
 -- ====================================================================
--- INITIALIZATION HOOKS & CONSOLE OUTPUT
+-- INITIALIZATION HOOKS
 -- ====================================================================
 if LocalPlayer.Character then
 	task.spawn(monitorHealth, LocalPlayer.Character)
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
--- Console print confirmation
-print("Util Loaded")
+print("Util Loaded") -- Final check point
