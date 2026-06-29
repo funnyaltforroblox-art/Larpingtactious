@@ -926,4 +926,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("DEBUG HOOORAH")
+print("Util Loaded")
