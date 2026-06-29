@@ -176,7 +176,7 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
--- ROBUST MOBILE DRAG ENGINE (REWRITTEN)
+-- ROBUST MOBILE DRAG ENGINE
 -- ====================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -193,7 +193,6 @@ pcall(function()
 end)
 if not uiParented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Improved touch-dragging handler that separates clicks from drags
 local function makeMobileDraggable(guiObject)
 	local dragging = false
 	local dragInput, dragStart, startPos
@@ -229,7 +228,7 @@ local function makeMobileDraggable(guiObject)
 	end)
 end
 
--- Main Config UI Window (Created first so the toggle button can read it)
+-- Main Config UI Window
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 300, 0, 310)
@@ -266,13 +265,11 @@ CircleCorner.Parent = ToggleButton
 
 local UIStroke = Instance.new("UIStroke")
 UIStroke.Color = Color3.fromRGB(0, 255, 150)
-UIStroke.Width = 2
+UIStroke.Thickness = 2 -- FIX: Changed from Width to Thickness
 UIStroke.Parent = ToggleButton
 
 makeMobileDraggable(ToggleButton)
 
--- Mobile-reliable toggle listener
--- Uses Activated instead of MouseButton1Click for better mobile touchscreen support
 ToggleButton.Activated:Connect(function()
 	MainFrame.Visible = not MainFrame.Visible
 end)
@@ -354,4 +351,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Util Loaded")
+print("This is going to be fucking awful")
