@@ -351,4 +351,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("This is going to be fucking awful")
+print("Lets get lit")
