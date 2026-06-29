@@ -1,16 +1,15 @@
--- Health-Based Face & Model Customizer (Sub-Component Offsets & Uniform Scaling Engine)
+-- Health-Based Face & Model Customizer (Unified Matrix Customization Engine + Mobile User Interface)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
+repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
 
 -- ====================================================================
--- COMPONENT DATABASE STRUCTURE (Your Core Customization Layout)
+-- CONFIGURATION & CENTRAL STORAGE LAYOUT
 -- ====================================================================
--- Each folder tier now supports multiple custom objects, with unique offsets 
--- for individual Sub-Parts (e.g., Handle, Component_1, etc.)
 local Config = {
 	SelectedDefault  = "face acc",      -- 100% Health Folder Name
 	SelectedMinor    = "MinorDamage",   -- <= 75% Health Folder Name
@@ -19,12 +18,17 @@ local Config = {
 	SelectedCritical = "CriticalDamage" -- <= 15% Health Folder Name
 }
 
--- Central memory database to look up structural edits for specific tier items
--- Format: CustomOffsets[TierName][ItemName][SubPartName] = {offsets...}
+-- Central dynamic registry tracking adjustments per tier, per model, per component
+-- Format: CustomOffsets[TierFolder][ItemName][ComponentName] = {Data}
 local CustomOffsets = {}
-
 local lastPreset = ""
 local activeClientInstances = {}
+
+-- UI State Tracking variables
+local selectedTierName = Config.SelectedDefault
+local selectedItemName = ""
+local selectedSubPartName = "Handle"
+local currentHighlightBox = nil
 
 -- ====================================================================
 -- DIRECTORY SETUP LAYER
@@ -49,6 +53,8 @@ local function ensureSubFolder(name)
 		local subFolder = Instance.new("Folder")
 		subFolder.Name = name
 		subFolder.Parent = TargetPresetFolder
+	end
+	if not CustomOffsets[name] then
 		CustomOffsets[name] = {}
 	end
 end
@@ -59,14 +65,11 @@ ensureSubFolder(Config.SelectedMedium)
 ensureSubFolder(Config.SelectedMajor)
 ensureSubFolder(Config.SelectedCritical)
 
--- Helper initialization function to map data schemas to items discovered inside the folders
 local function initializeItemData(tierName, item)
 	if not CustomOffsets[tierName] then CustomOffsets[tierName] = {} end
-	if CustomOffsets[tierName][item.Name] then return end -- Already initialized
+	if CustomOffsets[tierName][item.Name] then return end
 	
 	local itemProfile = {}
-	
-	-- Locate primary handles
 	local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart", true)
 	if not handle and item:IsA("Model") and item.PrimaryPart then handle = item.PrimaryPart end
 	
@@ -102,13 +105,54 @@ local function initializeItemData(tierName, item)
 end
 
 -- ====================================================================
--- POSITIONING, SCALING & ATTACHMENT CORE PIPELINE
+-- HIGHLIGHT SELECTION LAYER
+-- ====================================================================
+local function clearActiveHighlight()
+	if currentHighlightBox then
+		currentHighlightBox:Destroy()
+		currentHighlightBox = nil
+	end
+end
+
+local function highlightSelectedSubPart()
+	clearActiveHighlight()
+	local character = LocalPlayer.Character
+	if not character or selectedItemName == "" then return end
+	
+	-- Search for the physical accessory instance actively attached to the user character
+	for _, inst in ipairs(activeClientInstances) do
+		if inst and inst.Parent and (inst.Name == selectedItemName or inst:FindFirstChild(selectedItemName)) then
+			local targetPartInstance = inst:Name() == selectedSubPartName and inst or inst:FindFirstChild(selectedSubPartName, true)
+			if not targetPartInstance then
+				for _, d in ipairs(inst:GetDescendants()) do
+					if d:IsA("BasePart") and d.Name == selectedSubPartName then
+						targetPartInstance = d
+						break
+					end
+				end
+			end
+			
+			if targetPartInstance and targetPartInstance:IsA("BasePart") then
+				local selectionBox = Instance.new("SelectionBox")
+				selectionBox.Name = "Customizer_PartHighlight"
+				selectionBox.Color3 = Color3.fromRGB(0, 255, 255)
+				selectionBox.LineThickness = 0.04
+				selectionBox.Adornee = targetPartInstance
+				selectionBox.Parent = targetPartInstance
+				currentHighlightBox = selectionBox
+				break
+			end
+		end
+	end
+end
+
+-- ====================================================================
+-- COUPLING MECHANICAL RE-WELD PIPELINE
 -- ====================================================================
 local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
 	if not head then return end
 	
-	-- Build internal layout data for the source asset first
 	initializeItemData(tierName, item)
 	local itemData = CustomOffsets[tierName][item.Name]
 	
@@ -119,14 +163,12 @@ local function localAttach(character, tierName, item)
 	
 	handle.Name = "Handle"
 	
-	-- Clean out game joints inside asset code blocks
 	for _, child in ipairs(clone:GetDescendants()) do
 		if child:IsA("Weld") or child:IsA("ManualWeld") or child:IsA("WeldConstraint") or child:IsA("Attachment") then
 			child:Destroy()
 		end
 	end
 	
-	-- 1. Apply scaling and inner sub-weld configurations if model contains components
 	local structuralOffsets = {}
 	local partCounter = 1
 	
@@ -152,7 +194,6 @@ local function localAttach(character, tierName, item)
 		end
 	end
 	
-	-- Handle base element adjustments
 	handle.Anchored = false; handle.CanCollide = false; handle.Massless = true
 	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1}
 	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
@@ -162,14 +203,12 @@ local function localAttach(character, tierName, item)
 		handle.Size = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
 	end
 
-	-- 2. Construct inner structural rigid matrices (Weld mapping)
 	for _, obj in ipairs(clone:GetDescendants()) do
 		if obj:IsA("BasePart") and obj ~= handle then
 			local pData = itemData[obj.Name] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0}
 			local innerWeld = Instance.new("Weld")
 			innerWeld.Name = "ModelInnerWeld"
-			innerWeld.Part0 = obj
-			innerWeld.Part1 = handle
+			innerWeld.Part0 = obj; innerWeld.Part1 = handle
 			
 			local originalLocalCFrame = structuralOffsets[obj.Name] or CFrame.new()
 			local customPosOffset = CFrame.new(pData.offsetX, pData.offsetY, pData.offsetZ)
@@ -180,19 +219,17 @@ local function localAttach(character, tierName, item)
 		end
 	end
 
-	-- 3. Parent to character and apply root attachment weld to Head
 	local accessory = clone:IsA("Accessory") and clone or Instance.new("Accessory")
 	if not clone:IsA("Accessory") then
-		accessory.Name = "CustomAttachedAsset"
+		accessory.Name = item.Name
 		clone.Parent = accessory
 	else
-		accessory.Name = clone.Name
+		accessory.Name = item.Name
 	end
 	
 	local rootWeld = Instance.new("Weld")
 	rootWeld.Name = "AccessoryWeld"
-	rootWeld.Part0 = handle
-	rootWeld.Part1 = head
+	rootWeld.Part0 = handle; rootWeld.Part1 = head
 	
 	local positionOffset = CFrame.new(rootData.offsetX, rootData.offsetY, rootData.offsetZ)
 	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX), math.rad(rootData.rotateY), math.rad(rootData.rotateZ))
@@ -205,6 +242,7 @@ local function localAttach(character, tierName, item)
 end
 
 local function clearActiveItems()
+	clearActiveHighlight()
 	for _, item in ipairs(activeClientInstances) do
 		if item and item.Parent then item:Destroy() end
 	end
@@ -221,11 +259,9 @@ local function applyPreset(character, folderName)
 	for _, item in ipairs(folder:GetChildren()) do
 		task.spawn(localAttach, character, folderName, item)
 	end
+	task.defer(highlightSelectedSubPart)
 end
 
--- ====================================================================
--- HEALTH DETECTOR MONITOR LOOP
--- ====================================================================
 local function monitorHealth(character)
 	local human = character:WaitForChild("Humanoid")
 	
@@ -249,6 +285,352 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
+-- MOBILE DRAG AND CONTROL GUI ENGINE
+-- ====================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FaceAccMobileUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local uiParented = false
+pcall(function()
+	if game:GetService("CoreGui") then
+		ScreenGui.Parent = game:GetService("CoreGui")
+		uiParented = true
+	end
+end)
+if not uiParented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local function makeMobileDraggable(guiObject)
+	local dragging = false
+	local dragInput, dragStart, startPos
+
+	guiObject.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = guiObject.Position
+			
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+
+	guiObject.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+-- Main Matrix Adjuster Framework Layout
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 440, 0, 310)
+MainFrame.Position = UDim2.new(0.5, -220, 0.4, -155)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+
+makeMobileDraggable(MainFrame)
+
+-- Circular Toggle Activation Core Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "FEXToggle"
+ToggleButton.Size = UDim2.new(0, 60, 0, 60)
+ToggleButton.Position = UDim2.new(0.1, 0, 0.3, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+ToggleButton.BorderSizePixel = 0
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.Text = "FEX"
+ToggleButton.TextColor3 = Color3.fromRGB(0, 255, 150)
+ToggleButton.TextSize = 16
+ToggleButton.Active = true
+ToggleButton.Parent = ScreenGui
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0)
+CircleCorner.Parent = ToggleButton
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 255, 150)
+UIStroke.Thickness = 2
+UIStroke.Parent = ToggleButton
+
+makeMobileDraggable(ToggleButton)
+
+ToggleButton.Activated:Connect(function()
+	MainFrame.Visible = not MainFrame.Visible
+	if MainFrame.Visible then highlightSelectedSubPart() else clearActiveHighlight() end
+end)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, 0, 0, 40)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "SUB-COMPONENT CONFIGURATION PANEL"
+TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
+TitleLabel.TextSize = 13
+TitleLabel.Parent = MainFrame
+
+-- Scrolling Multi-Column Lists Layout Frame
+local TierSelectionPanel = Instance.new("ScrollingFrame")
+TierSelectionPanel.Size = UDim2.new(0, 120, 1, -60)
+TierSelectionPanel.Position = UDim2.new(0, 10, 0, 45)
+TierSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+TierSelectionPanel.BorderSizePixel = 0
+TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+TierSelectionPanel.ScrollBarThickness = 3
+TierSelectionPanel.Parent = MainFrame
+
+local ItemSelectionPanel = Instance.new("ScrollingFrame")
+ItemSelectionPanel.Size = UDim2.new(0, 120, 1, -60)
+ItemSelectionPanel.Position = UDim2.new(0, 135, 0, 45)
+ItemSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+ItemSelectionPanel.BorderSizePixel = 0
+ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+ItemSelectionPanel.ScrollBarThickness = 3
+ItemSelectionPanel.Parent = MainFrame
+
+local EditorScroll = Instance.new("ScrollingFrame")
+EditorScroll.Size = UDim2.new(0, 165, 1, -60)
+EditorScroll.Position = UDim2.new(0, 265, 0, 45)
+EditorScroll.BackgroundTransparency = 1
+EditorScroll.BorderSizePixel = 0
+EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
+EditorScroll.ScrollBarThickness = 3
+EditorScroll.Parent = MainFrame
+
+local updateTierUI, updateItemUI, updateEditorUI
+
+-- Component Sub-Dropdown Core Target
+local compSelectBtn = Instance.new("TextButton")
+compSelectBtn.Size = UDim2.new(1, 0, 0, 28)
+compSelectBtn.Position = UDim2.new(0, 0, 0, 0)
+compSelectBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 45)
+compSelectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+compSelectBtn.Text = "Part: Handle"
+compSelectBtn.Font = Enum.Font.GothamBold
+compSelectBtn.TextSize = 11
+compSelectBtn.Parent = EditorScroll
+
+local compDropdownScroll = Instance.new("ScrollingFrame")
+compDropdownScroll.Size = UDim2.new(1, 0, 0, 100)
+compDropdownScroll.Position = UDim2.new(0, 0, 0, 30)
+compDropdownScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+compDropdownScroll.ZIndex = 5
+compDropdownScroll.Visible = false
+compDropdownScroll.Parent = EditorScroll
+
+compSelectBtn.Activated:Connect(function()
+	compDropdownScroll.Visible = not compDropdownScroll.Visible
+end)
+
+local inputs = {}
+local function createMatrixInput(labelText, property, yPos)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0, 70, 0, 24)
+	label.Position = UDim2.new(0, 0, 0, yPos)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamSemibold
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(170, 170, 180)
+	label.TextSize = 11
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = EditorScroll
+
+	local textBox = Instance.new("TextBox")
+	textBox.Size = UDim2.new(1, -75, 0, 24)
+	textBox.Position = UDim2.new(0, 75, 0, yPos)
+	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	textBox.BorderSizePixel = 0
+	textBox.Font = Enum.Font.Gotham
+	textBox.Text = "0"
+	textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	textBox.TextSize = 11
+	textBox.ClearTextOnFocus = false
+	
+	local boxCorner = Instance.new("UICorner")
+	boxCorner.CornerRadius = UDim.new(0, 4)
+	boxCorner.Parent = textBox
+	textBox.Parent = EditorScroll
+
+	textBox.FocusLost:Connect(function()
+		if selectedItemName == "" then return end
+		local tierData = CustomOffsets[selectedTierName]
+		if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
+			local val = tonumber(textBox.Text)
+			if val then
+				tierData[selectedItemName][selectedSubPartName][property] = val
+				if LocalPlayer.Character then
+					applyPreset(LocalPlayer.Character, lastPreset) -- Immediate live re-render
+				end
+			end
+		end
+	end)
+	inputs[property] = textBox
+end
+
+createMatrixInput("Offset X:", "offsetX", 140)
+createMatrixInput("Offset Y:", "offsetY", 170)
+createMatrixInput("Offset Z:", "offsetZ", 200)
+createMatrixInput("Rotate X:", "rotateX", 230)
+createMatrixInput("Rotate Y:", "rotateY", 260)
+createMatrixInput("Rotate Z:", "rotateZ", 290)
+createMatrixInput("Scale Unif:", "scaleX", 320) -- Scales uniformly across structural bounds
+
+-- Watchers on uniform inputs to write parallel axes
+inputs["scaleX"].FocusLost:Connect(function()
+	if selectedItemName == "" then return end
+	local tierData = CustomOffsets[selectedTierName]
+	if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
+		local val = tonumber(inputs["scaleX"].Text)
+		if val then
+			tierData[selectedItemName][selectedSubPartName].scaleY = val
+			tierData[selectedItemName][selectedSubPartName].scaleZ = val
+			if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
+		end
+	end
+end)
+
+updateEditorUI = function()
+	if selectedItemName == "" then
+		compSelectBtn.Text = "No Item Selected"
+		for _, box in pairs(inputs) do box.Text = "" end
+		return
+	end
+	
+	compSelectBtn.Text = "Part: " .. selectedSubPartName
+	compDropdownScroll.TextColor3 = Color3.fromRGB(255, 255, 255)
+	compDropdownScroll:ClearAllChildren()
+	
+	local dropLayout = Instance.new("UIListLayout")
+	dropLayout.Parent = compDropdownScroll
+	
+	local itemProfile = CustomOffsets[selectedTierName][selectedItemName]
+	if not itemProfile then return end
+	
+	local sorted = {}
+	for n, _ in pairs(itemProfile) do table.insert(sorted, n) end
+	table.sort(sorted, function(a, b) if a == "Handle" then return true elseif b == "Handle" then return false else return a < b end end)
+	
+	for _, pName in ipairs(sorted) do
+		local rBtn = Instance.new("TextButton")
+		rBtn.Size = UDim2.new(1, 0, 0, 22)
+		rBtn.BackgroundColor3 = (pName == selectedSubPartName) and Color3.fromRGB(0, 120, 60) or Color3.fromRGB(30, 30, 35)
+		rBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		rBtn.Text = pName
+		rBtn.Font = Enum.Font.Gotham
+		rBtn.TextSize = 10
+		rBtn.Parent = compDropdownScroll
+		
+		rBtn.Activated:Connect(function()
+			selectedSubPartName = pName
+			compDropdownScroll.Visible = false
+			updateEditorUI()
+			highlightSelectedSubPart()
+		end)
+	end
+	compDropdownScroll.CanvasSize = UDim2.new(0, 0, 0, #sorted * 22)
+	
+	local pData = itemProfile[selectedSubPartName]
+	if pData then
+		inputs["offsetX"].Text = tostring(pData.offsetX)
+		inputs["offsetY"].Text = tostring(pData.offsetY)
+		inputs["offsetZ"].Text = tostring(pData.offsetZ)
+		inputs["rotateX"].Text = tostring(pData.rotateX)
+		inputs["rotateY"].Text = tostring(pData.rotateY)
+		inputs["rotateZ"].Text = tostring(pData.rotateZ)
+		inputs["scaleX"].Text  = tostring(pData.scaleX)
+	end
+end
+
+updateItemUI = function()
+	ItemSelectionPanel:ClearAllChildren()
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 4)
+	listLayout.Parent = ItemSelectionPanel
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if not targetFolder then return end
+	
+	local children = targetFolder:GetChildren()
+	if #children == 0 then
+		selectedItemName = ""
+		updateEditorUI()
+		return
+	end
+	
+	for _, child in ipairs(children) do
+		initializeItemData(selectedTierName, child)
+		
+		local iBtn = Instance.new("TextButton")
+		iBtn.Size = UDim2.new(1, 0, 0, 26)
+		iBtn.BackgroundColor3 = (child.Name == selectedItemName) and Color3.fromRGB(0, 90, 160) or Color3.fromRGB(35, 35, 40)
+		iBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		iBtn.Text = child.Name
+		iBtn.Font = Enum.Font.GothamSemibold
+		iBtn.TextSize = 10
+		iBtn.Parent = ItemSelectionPanel
+		
+		iBtn.Activated:Connect(function()
+			selectedItemName = child.Name
+			selectedSubPartName = "Handle"
+			updateItemUI()
+			updateEditorUI()
+			highlightSelectedSubPart()
+		end)
+	end
+end
+
+updateTierUI = function()
+	TierSelectionPanel:ClearAllChildren()
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 4)
+	listLayout.Parent = TierSelectionPanel
+	
+	local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
+	for _, tName in ipairs(tiers) do
+		local tBtn = Instance.new("TextButton")
+		tBtn.Size = UDim2.new(1, 0, 0, 26)
+		tBtn.BackgroundColor3 = (tName == selectedTierName) and Color3.fromRGB(120, 80, 0) or Color3.fromRGB(35, 35, 40)
+		tBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tBtn.Text = tName
+		tBtn.Font = Enum.Font.GothamBold
+		tBtn.TextSize = 10
+		tBtn.Parent = TierSelectionPanel
+		
+		tBtn.Activated:Connect(function()
+			selectedTierName = tName
+			selectedItemName = ""
+			selectedSubPartName = "Handle"
+			updateTierUI()
+			updateItemUI()
+			updateEditorUI()
+			clearActiveHighlight()
+		end)
+	end
+end
+
+updateTierUI()
+updateItemUI()
+updateEditorUI()
+
+-- ====================================================================
 -- INITIALIZATION HOOKS
 -- ====================================================================
 if LocalPlayer.Character then
@@ -256,4 +638,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Oh again?")
+print("We are soooo f*cked")
