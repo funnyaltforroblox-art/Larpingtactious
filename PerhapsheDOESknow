@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB Sliders + LOCAL FILE SAVE)
+-- Health-Based Face & Model Customizer (With ID Persistence & Local File Save)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -9,21 +9,21 @@ local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
 
--- Local Workspace File Settings
 local FILE_NAME = "FEX_Customizer_Presets.json"
 
 -- ====================================================================
 -- CONFIGURATION & CENTRAL STORAGE LAYOUT
 -- ====================================================================
 local Config = {
-	SelectedDefault  = "face acc",      -- 100% Health Folder Name
-	SelectedMinor    = "MinorDamage",   -- <= 75% Health Folder Name
-	SelectedMedium   = "MediumDamage",  -- <= 50% Health Folder Name
-	SelectedMajor    = "MajorDamage",   -- <= 30% Health Folder Name
-	SelectedCritical = "CriticalDamage" -- <= 15% Health Folder Name
+	SelectedDefault  = "face acc",      
+	SelectedMinor    = "MinorDamage",   
+	SelectedMedium   = "MediumDamage",  
+	SelectedMajor    = "MajorDamage",   
+	SelectedCritical = "CriticalDamage" 
 }
 
 local CustomOffsets = {}
+local AssetIdsToLoad = {} -- Keeps track of IDs injected per tier
 local lastPreset = ""
 local activeClientInstances = {}
 
@@ -32,6 +32,9 @@ local selectedItemName = ""
 local selectedSubPartName = "Handle"
 local currentHighlightBox = nil
 
+-- Forward declaration of asset injection utility
+local injectAssetId
+
 -- ====================================================================
 -- LOCAL FILE SYSTEM SAVE / LOAD PIPELINE
 -- ====================================================================
@@ -39,7 +42,11 @@ local function saveProfileData()
 	task.spawn(function()
 		local success, err = pcall(function()
 			if writefile then
-				local jsonString = HttpService:JSONEncode(CustomOffsets)
+				local package = {
+					Offsets = CustomOffsets,
+					AssetIds = AssetIdsToLoad
+				}
+				local jsonString = HttpService:JSONEncode(package)
 				writefile(FILE_NAME, jsonString)
 			else
 				warn("[FEX Save Warning]: Your executor does not support 'writefile'.")
@@ -64,7 +71,14 @@ local function loadProfileData()
 			return HttpService:JSONDecode(result)
 		end)
 		if successParse and type(parsedData) == "table" then
-			CustomOffsets = parsedData
+			-- Backwards compatibility and multi-structure support
+			if parsedData.Offsets and parsedData.AssetIds then
+				CustomOffsets = parsedData.Offsets
+				AssetIdsToLoad = parsedData.AssetIds
+			else
+				CustomOffsets = parsedData
+				AssetIdsToLoad = {}
+			end
 			print("[FEX Local Engine]: Successfully loaded presets from workspace/" .. FILE_NAME)
 			return
 		end
@@ -72,7 +86,7 @@ local function loadProfileData()
 	print("[FEX Local Engine]: No local file found or fresh setup. Creating clean profile matrix.")
 end
 
--- Force load from local storage file immediately
+-- Force load profile structural mappings immediately
 loadProfileData()
 
 -- ====================================================================
@@ -99,9 +113,8 @@ local function ensureSubFolder(name)
 		subFolder.Name = name
 		subFolder.Parent = TargetPresetFolder
 	end
-	if not CustomOffsets[name] then
-		CustomOffsets[name] = {}
-	end
+	if not CustomOffsets[name] then CustomOffsets[name] = {} end
+	if not AssetIdsToLoad[name] then AssetIdsToLoad[name] = {} end
 end
 
 ensureSubFolder(Config.SelectedDefault)
@@ -411,7 +424,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui
+MainFrame.Parent = MainFrame.Parent or ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -478,7 +491,6 @@ ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
 ItemSelectionPanel.ScrollBarThickness = 3
 ItemSelectionPanel.Parent = MainFrame
 
--- UI Canvas Dynamic Scrolling Content Box
 local EditorScroll = Instance.new("ScrollingFrame")
 EditorScroll.Size = UDim2.new(0, 165, 1, -100)
 EditorScroll.Position = UDim2.new(0, 265, 0, 40)
@@ -492,7 +504,6 @@ EditorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 EditorListLayout.Padding = UDim.new(0, 5)
 EditorListLayout.Parent = EditorScroll
 
--- Auto Canvas Size configuration adjustment hook
 EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 15)
 end)
@@ -510,7 +521,6 @@ local ColorPanelCorner = Instance.new("UICorner")
 ColorPanelCorner.CornerRadius = UDim.new(0, 6)
 ColorPanelCorner.Parent = ColorPanel
 
--- Asset ID Injector Interface Row
 local InjectorFrame = Instance.new("Frame")
 InjectorFrame.Size = UDim2.new(1, -20, 0, 45)
 InjectorFrame.Position = UDim2.new(0, 10, 1, -55)
@@ -555,6 +565,39 @@ InjectBtnCorner.Parent = InjectBtn
 
 local updateTierUI, updateItemUI, updateEditorUI
 
+-- Central injection process engine
+injectAssetId = function(id, tierName, isSilentRestore)
+	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
+	if not targetFolder then return false end
+	
+	local success, assetModel = pcall(function()
+		return game:GetObjects("rbxassetid://" .. id)[1]
+	end)
+	
+	if success and assetModel then
+		assetModel.Name = "Asset_" .. tostring(id)
+		assetModel.Parent = targetFolder
+		
+		-- Track download ID to list if not already indexed
+		if not table.find(AssetIdsToLoad[tierName], id) then
+			table.insert(AssetIdsToLoad[tierName], id)
+		end
+		
+		initializeItemData(tierName, assetModel)
+		
+		if not isSilentRestore then
+			selectedItemName = assetModel.Name
+			selectedSubPartName = "Handle"
+			if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
+			updateItemUI()
+			updateEditorUI()
+			saveProfileData()
+		end
+		return true
+	end
+	return false
+end
+
 InjectBtn.Activated:Connect(function()
 	local id = tonumber(IdTextBox.Text)
 	if not id then IdTextBox.Text = "Invalid ID!"; task.wait(1); IdTextBox.Text = ""; return end
@@ -563,29 +606,8 @@ InjectBtn.Activated:Connect(function()
 	InjectBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
 	
 	task.spawn(function()
-		local success, assetModel = pcall(function()
-			return game:GetObjects("rbxassetid://" .. id)[1]
-		end)
-		
-		if success and assetModel then
-			local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
-			if targetFolder then
-				assetModel.Name = "Asset_" .. tostring(id)
-				assetModel.Parent = targetFolder
-				
-				initializeItemData(selectedTierName, assetModel)
-				selectedItemName = assetModel.Name
-				selectedSubPartName = "Handle"
-				
-				IdTextBox.Text = "Success!"
-				if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
-				updateItemUI()
-				updateEditorUI()
-			end
-		else
-			IdTextBox.Text = "Load Fail!"
-		end
-		
+		local ok = injectAssetId(id, selectedTierName, false)
+		IdTextBox.Text = ok and "Success!" or "Load Fail!"
 		task.wait(1.2)
 		InjectBtn.Text = "DOWNLOAD ID"
 		InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
@@ -859,8 +881,6 @@ updateItemUI = function()
 	end
 	
 	for _, child in ipairs(children) do
-		initializeItemData(selectedTierName, child)
-		
 		local iBtn = Instance.new("TextButton")
 		iBtn.Size = UDim2.new(1, 0, 0, 26)
 		iBtn.BackgroundColor3 = (child.Name == selectedItemName) and Color3.fromRGB(0, 90, 160) or Color3.fromRGB(35, 35, 40)
@@ -911,9 +931,35 @@ updateTierUI = function()
 	TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 0, #tiers * 30)
 end
 
+-- ====================================================================
+-- SILENT RESTORATION BATCH SEQUENCE
+-- ====================================================================
+local function batchRehydrateSavedAssets()
+	print("[FEX Restorer]: Parsing structure for saved mesh accessories...")
+	local count = 0
+	for tierName, idList in pairs(AssetIdsToLoad) do
+		for _, id in ipairs(idList) do
+			count = count + 1
+			task.spawn(function()
+				injectAssetId(id, tierName, true)
+				-- Refresh UI states progressively as assets background mount
+				if tierName == selectedTierName then
+					updateItemUI()
+					updateEditorUI()
+				end
+			end)
+		end
+	end
+	print("[FEX Restorer]: Triggered " .. tostring(count) .. " assets for local session generation.")
+end
+
+-- Initialize UI Components
 updateTierUI()
 updateItemUI()
 updateEditorUI()
+
+-- Begin automated asset historical rebuilding
+batchRehydrateSavedAssets()
 
 -- ====================================================================
 -- INITIALIZATION HOOKS
@@ -927,4 +973,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("My head..")
+print("hihi")
