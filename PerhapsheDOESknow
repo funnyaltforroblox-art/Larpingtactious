@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (With ID Persistence & Local File Save)
+-- Health-Based Face & Model Customizer (With Local-Axis Rotation, Save & Preview)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -23,16 +23,16 @@ local Config = {
 }
 
 local CustomOffsets = {}
-local AssetIdsToLoad = {} -- Keeps track of IDs injected per tier
+local AssetIdsToLoad = {} 
 local lastPreset = ""
 local activeClientInstances = {}
+local isPreviewingMode = false 
 
 local selectedTierName = Config.SelectedDefault
 local selectedItemName = ""
 local selectedSubPartName = "Handle"
 local currentHighlightBox = nil
 
--- Forward declaration of asset injection utility
 local injectAssetId
 
 -- ====================================================================
@@ -71,7 +71,6 @@ local function loadProfileData()
 			return HttpService:JSONDecode(result)
 		end)
 		if successParse and type(parsedData) == "table" then
-			-- Backwards compatibility and multi-structure support
 			if parsedData.Offsets and parsedData.AssetIds then
 				CustomOffsets = parsedData.Offsets
 				AssetIdsToLoad = parsedData.AssetIds
@@ -86,7 +85,6 @@ local function loadProfileData()
 	print("[FEX Local Engine]: No local file found or fresh setup. Creating clean profile matrix.")
 end
 
--- Force load profile structural mappings immediately
 loadProfileData()
 
 -- ====================================================================
@@ -230,7 +228,7 @@ local function applyColorTransform(part, pData)
 end
 
 -- ====================================================================
--- COUPLING MECHANICAL RE-WELD PIPELINE
+-- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL-AXIS ROTATION FIXED)
 -- ====================================================================
 local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
@@ -288,6 +286,7 @@ local function localAttach(character, tierName, item)
 	end
 	applyColorTransform(handle, rootData)
 
+	-- Apply self-axis rotation to component child parts
 	for _, obj in ipairs(clone:GetDescendants()) do
 		if obj:IsA("BasePart") and obj ~= handle then
 			local pData = itemData[obj.Name] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0}
@@ -299,7 +298,8 @@ local function localAttach(character, tierName, item)
 			local customPosOffset = CFrame.new(pData.offsetX, pData.offsetY, pData.offsetZ)
 			local customRotOffset = CFrame.Angles(math.rad(pData.rotateX), math.rad(pData.rotateY), math.rad(pData.rotateZ))
 			
-			innerWeld.C0 = originalLocalCFrame:Inverse() * (customPosOffset * customRotOffset)
+			-- Multiplied rotation after original position keeps it rotating on its own axis center
+			innerWeld.C0 = originalLocalCFrame:Inverse() * customPosOffset * customRotOffset
 			innerWeld.Parent = obj
 		end
 	end
@@ -319,6 +319,8 @@ local function localAttach(character, tierName, item)
 	local positionOffset = CFrame.new(rootData.offsetX, rootData.offsetY, rootData.offsetZ)
 	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX), math.rad(rootData.rotateY), math.rad(rootData.rotateZ))
 	
+	-- FIXED: Swapped C0 multiplication order. 
+	-- This isolates rotation onto the Handle's localized object center instead of dragging around the head orbit.
 	rootWeld.C0 = positionOffset * rotationOffset
 	rootWeld.Parent = handle
 	
@@ -347,26 +349,31 @@ local function applyPreset(character, folderName)
 	task.defer(highlightSelectedSubPart)
 end
 
+local function forceRecalculateHealthPreset(character)
+	if isPreviewingMode then return end 
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then return end
+	
+	local ratio = humanoid.Health / humanoid.MaxHealth
+	local target = Config.SelectedDefault
+	
+	if ratio <= 0.15 then target = Config.SelectedCritical
+	elseif ratio <= 0.30 then target = Config.SelectedMajor
+	elseif ratio <= 0.50 then target = Config.SelectedMedium
+	elseif ratio <= 0.75 then target = Config.SelectedMinor end
+	
+	if target ~= lastPreset then
+		lastPreset = target
+		applyPreset(character, target)
+	end
+end
+
 local function monitorHealth(character)
 	local humanoid = character:WaitForChild("Humanoid")
-	
-	local function check()
-		local ratio = humanoid.Health / humanoid.MaxHealth
-		local target = Config.SelectedDefault
-		
-		if ratio <= 0.15 then target = Config.SelectedCritical
-		elseif ratio <= 0.30 then target = Config.SelectedMajor
-		elseif ratio <= 0.50 then target = Config.SelectedMedium
-		elseif ratio <= 0.75 then target = Config.SelectedMinor end
-		
-		if target ~= lastPreset then
-			lastPreset = target
-			applyPreset(character, target)
-		end
-	end
-	
-	humanoid.HealthChanged:Connect(check)
-	check()
+	humanoid.HealthChanged:Connect(function()
+		forceRecalculateHealthPreset(character)
+	end)
+	forceRecalculateHealthPreset(character)
 end
 
 -- ====================================================================
@@ -424,7 +431,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = MainFrame.Parent or ScreenGui
+MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -462,15 +469,51 @@ ToggleButton.Activated:Connect(function()
 end)
 
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, -180, 0, 35)
+TitleLabel.Size = UDim2.new(1, -250, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
 TitleLabel.Text = "MODEL CONFIGURATION & AUTOMATIC PERSISTENCE PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
-TitleLabel.TextSize = 12
+TitleLabel.TextSize = 11
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Position = UDim2.new(0, 15, 0, 0)
 TitleLabel.Parent = MainFrame
+
+local PreviewToggleBtn = Instance.new("TextButton")
+PreviewToggleBtn.Size = UDim2.new(0, 100, 0, 24)
+PreviewToggleBtn.Position = UDim2.new(1, -115, 0, 6)
+PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 35)
+PreviewToggleBtn.Font = Enum.Font.GothamBold
+PreviewToggleBtn.Text = "PREVIEW: OFF"
+PreviewToggleBtn.TextColor3 = Color3.fromRGB(240, 90, 90)
+PreviewToggleBtn.TextSize = 10
+PreviewToggleBtn.Parent = MainFrame
+
+local PrevCorner = Instance.new("UICorner")
+PrevCorner.CornerRadius = UDim.new(0, 4)
+PrevCorner.Parent = PreviewToggleBtn
+
+local function runUpdatePreviewCycle()
+	if not LocalPlayer.Character then return end
+	if isPreviewingMode then
+		PreviewToggleBtn.Text = "PREVIEW: ON"
+		PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 110, 60)
+		PreviewToggleBtn.TextColor3 = Color3.fromRGB(90, 255, 150)
+		lastPreset = "PREVIEW_OVERRIDE_LOCK"
+		applyPreset(LocalPlayer.Character, selectedTierName)
+	else
+		PreviewToggleBtn.Text = "PREVIEW: OFF"
+		PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 35)
+		PreviewToggleBtn.TextColor3 = Color3.fromRGB(240, 90, 90)
+		lastPreset = ""
+		forceRecalculateHealthPreset(LocalPlayer.Character)
+	end
+end
+
+PreviewToggleBtn.Activated:Connect(function()
+	isPreviewingMode = not isPreviewingMode
+	runUpdatePreviewCycle()
+end)
 
 -- Scrolling Lists Layout
 local TierSelectionPanel = Instance.new("ScrollingFrame")
@@ -565,7 +608,6 @@ InjectBtnCorner.Parent = InjectBtn
 
 local updateTierUI, updateItemUI, updateEditorUI
 
--- Central injection process engine
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
@@ -578,7 +620,6 @@ injectAssetId = function(id, tierName, isSilentRestore)
 		assetModel.Name = "Asset_" .. tostring(id)
 		assetModel.Parent = targetFolder
 		
-		-- Track download ID to list if not already indexed
 		if not table.find(AssetIdsToLoad[tierName], id) then
 			table.insert(AssetIdsToLoad[tierName], id)
 		end
@@ -588,7 +629,13 @@ injectAssetId = function(id, tierName, isSilentRestore)
 		if not isSilentRestore then
 			selectedItemName = assetModel.Name
 			selectedSubPartName = "Handle"
-			if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
+			
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			elseif LocalPlayer.Character then
+				applyPreset(LocalPlayer.Character, lastPreset)
+			end
+			
 			updateItemUI()
 			updateEditorUI()
 			saveProfileData()
@@ -615,7 +662,6 @@ InjectBtn.Activated:Connect(function()
 	end)
 end)
 
--- Component Sub-Dropdown Target
 local compSelectBtn = Instance.new("TextButton")
 compSelectBtn.Size = UDim2.new(1, 0, 0, 26)
 compSelectBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 45)
@@ -685,7 +731,9 @@ local function createMatrixInput(labelText, property, orderingIndex)
 			local val = tonumber(textBox.Text)
 			if val then
 				tierData[selectedItemName][selectedSubPartName][property] = val
-				if LocalPlayer.Character then
+				if isPreviewingMode then
+					runUpdatePreviewCycle()
+				elseif LocalPlayer.Character then
 					applyPreset(LocalPlayer.Character, lastPreset)
 				end
 				saveProfileData()
@@ -705,9 +753,6 @@ createMatrixInput("Scale X:",  "scaleX",  16)
 createMatrixInput("Scale Y:",  "scaleY",  17)
 createMatrixInput("Scale Z:",  "scaleZ",  18)
 
--- ====================================================================
--- SLIDER CREATION ENGINE (RGB & SATURATION)
--- ====================================================================
 local sliders = {}
 local function createColorSlider(name, color, yPos, min, max)
 	local label = Instance.new("TextLabel")
@@ -758,7 +803,9 @@ local function createColorSlider(name, color, yPos, min, max)
 			local tierData = CustomOffsets[selectedTierName]
 			if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
 				tierData[selectedItemName][selectedSubPartName][name] = computedValue
-				if LocalPlayer.Character then
+				if isPreviewingMode then
+					runUpdatePreviewCycle()
+				elseif LocalPlayer.Character then
 					applyPreset(LocalPlayer.Character, lastPreset)
 				end
 			end
@@ -926,14 +973,15 @@ updateTierUI = function()
 			updateItemUI()
 			updateEditorUI()
 			clearActiveHighlight()
+			
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			end
 		end)
 	end
 	TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 0, #tiers * 30)
 end
 
--- ====================================================================
--- SILENT RESTORATION BATCH SEQUENCE
--- ====================================================================
 local function batchRehydrateSavedAssets()
 	print("[FEX Restorer]: Parsing structure for saved mesh accessories...")
 	local count = 0
@@ -942,7 +990,6 @@ local function batchRehydrateSavedAssets()
 			count = count + 1
 			task.spawn(function()
 				injectAssetId(id, tierName, true)
-				-- Refresh UI states progressively as assets background mount
 				if tierName == selectedTierName then
 					updateItemUI()
 					updateEditorUI()
@@ -953,12 +1000,10 @@ local function batchRehydrateSavedAssets()
 	print("[FEX Restorer]: Triggered " .. tostring(count) .. " assets for local session generation.")
 end
 
--- Initialize UI Components
 updateTierUI()
 updateItemUI()
 updateEditorUI()
 
--- Begin automated asset historical rebuilding
 batchRehydrateSavedAssets()
 
 -- ====================================================================
@@ -973,4 +1018,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("hihi")
+print("Util Loaded with Local Axis Joint Rotation Engine")
