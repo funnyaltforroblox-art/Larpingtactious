@@ -3,12 +3,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
-print("[FEX Debug] Script initialized...") -- First check point
+print("[FEX Debug] Running optimized UI layer...")
 
 -- ====================================================================
--- INSTANT REPLICATED STORAGE COMPATIBILITY LAYER
+-- AUTOMATIC FOLDER CREATION LAYER
 -- ====================================================================
--- Using FindFirstChild to prevent infinite freezing/hanging
 local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
 if not TargetPresetFolder then
 	local success, result = pcall(function()
@@ -17,14 +16,10 @@ if not TargetPresetFolder then
 		folder.Parent = ReplicatedStorage
 		return folder
 	end)
-	if success then
-		TargetPresetFolder = result
-	else
-		-- Absolute fallback if ReplicatedStorage is completely locked down by game core
+	if success then TargetPresetFolder = result else
 		TargetPresetFolder = Instance.new("Folder")
 		TargetPresetFolder.Name = "FaceAccPresets"
 		TargetPresetFolder.Parent = LocalPlayer:WaitForChild("PlayerGui")
-		print("[FEX Warning] ReplicatedStorage locked. Folders created in PlayerGui instead.")
 	end
 end
 
@@ -165,15 +160,10 @@ local function monitorHealth(character)
 		local ratio = human.Health / human.MaxHealth
 		local target = Config.SelectedDefault
 		
-		if ratio <= 0.15 then
-			target = Config.SelectedCritical
-		elseif ratio <= 0.30 then
-			target = Config.SelectedMajor
-		elseif ratio <= 0.50 then
-			target = Config.SelectedMedium
-		elseif ratio <= 0.75 then
-			target = Config.SelectedMinor
-		end
+		if ratio <= 0.15 then target = Config.SelectedCritical
+		elseif ratio <= 0.30 then target = Config.SelectedMajor
+		elseif ratio <= 0.50 then target = Config.SelectedMedium
+		elseif ratio <= 0.75 then target = Config.SelectedMinor end
 		
 		if target ~= lastPreset then
 			lastPreset = target
@@ -186,7 +176,7 @@ local function monitorHealth(character)
 end
 
 -- ====================================================================
--- SAFE MOBILE INTERFACE PARENTING
+-- ROBUST MOBILE DRAG ENGINE (REWRITTEN)
 -- ====================================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -194,7 +184,6 @@ ScreenGui.Name = "FaceAccMobileUI"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Safely try CoreGui. If your engine lacks core permission, force fallback to PlayerGui instantly.
 local uiParented = false
 pcall(function()
 	if game:GetService("CoreGui") then
@@ -202,45 +191,66 @@ pcall(function()
 		uiParented = true
 	end
 end)
+if not uiParented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-if not uiParented then
-	ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+-- Improved touch-dragging handler that separates clicks from drags
+local function makeMobileDraggable(guiObject)
+	local dragging = false
+	local dragInput, dragStart, startPos
 
-local function makeMobileDraggable(frame)
-	local dragging, dragInput, dragStart, startPos
-	
-	frame.InputBegan:Connect(function(input)
+	guiObject.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
-			startPos = frame.Position
+			startPos = guiObject.Position
 			
 			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
 			end)
 		end
 	end)
-	
-	frame.InputChanged:Connect(function(input)
+
+	guiObject.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 			dragInput = input
 		end
 	end)
-	
+
 	UserInputService.InputChanged:Connect(function(input)
 		if input == dragInput and dragging then
 			local delta = input.Position - dragStart
-			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			guiObject.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X, 
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
 		end
 	end)
 end
+
+-- Main Config UI Window (Created first so the toggle button can read it)
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 300, 0, 310)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -155)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+
+makeMobileDraggable(MainFrame)
 
 -- Circular FEX Toggle Button
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "FEXToggle"
 ToggleButton.Size = UDim2.new(0, 60, 0, 60)
-ToggleButton.Position = UDim2.new(0.1, 0, 0.2, 0)
+ToggleButton.Position = UDim2.new(0.1, 0, 0.3, 0)
 ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 ToggleButton.BorderSizePixel = 0
 ToggleButton.Font = Enum.Font.GothamBold
@@ -261,27 +271,13 @@ UIStroke.Parent = ToggleButton
 
 makeMobileDraggable(ToggleButton)
 
--- Main Config UI Window
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 310)
-MainFrame.Position = UDim2.new(0.5, -150, 0.4, -155)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = false
-MainFrame.Active = true
-MainFrame.Parent = ScreenGui
-
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 12)
-MainCorner.Parent = MainFrame
-
-makeMobileDraggable(MainFrame)
-
-ToggleButton.MouseButton1Click:Connect(function()
+-- Mobile-reliable toggle listener
+-- Uses Activated instead of MouseButton1Click for better mobile touchscreen support
+ToggleButton.Activated:Connect(function()
 	MainFrame.Visible = not MainFrame.Visible
 end)
 
+-- Window Title Header
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 40)
 TitleLabel.BackgroundTransparency = 1
@@ -291,6 +287,7 @@ TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 13
 TitleLabel.Parent = MainFrame
 
+-- Rows Container
 local Container = Instance.new("Frame")
 Container.Size = UDim2.new(1, -20, 1, -50)
 Container.Position = UDim2.new(0, 10, 0, 45)
@@ -357,4 +354,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Util Loaded") -- Final check point
+print("Util Loaded")
