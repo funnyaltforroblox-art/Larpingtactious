@@ -3,29 +3,55 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- CHANGE THIS to the folder path where you keep your preset configurations!
-local TargetPresetFolder = ReplicatedStorage:WaitForChild("FaceAccPresets", 5) or ReplicatedStorage
+-- ====================================================================
+-- AUTOMATIC FOLDER CREATION LAYER
+-- ====================================================================
+local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
+if not TargetPresetFolder then
+	TargetPresetFolder = Instance.new("Folder")
+	TargetPresetFolder.Name = "FaceAccPresets"
+	TargetPresetFolder.Parent = ReplicatedStorage
+end
 
--- Default configuration settings
+local function ensureSubFolder(name)
+	if not TargetPresetFolder:FindFirstChild(name) then
+		local subFolder = Instance.new("Folder")
+		subFolder.Name = name
+		subFolder.Parent = TargetPresetFolder
+	end
+end
+
+-- Pre-build all 5 folders natively
+ensureSubFolder("face acc")
+ensureSubFolder("MinorDamage")
+ensureSubFolder("MediumDamage")
+ensureSubFolder("MajorDamage")
+ensureSubFolder("CriticalDamage")
+
+-- Default configuration settings and pointer registers
 local Config = {
-	MinorThreshold = 0.70,
-	MajorThreshold = 0.30,
-	SelectedDefault = "face acc",
-	SelectedMinor = "MinorDamage",
-	SelectedMajor = "MajorDamage"
+	SelectedDefault  = "face acc",      -- 100% Health
+	SelectedMinor    = "MinorDamage",   -- Under 75% Health
+	SelectedMedium   = "MediumDamage",  -- Under 50% Health
+	SelectedMajor    = "MajorDamage",   -- Under 30% Health
+	SelectedCritical = "CriticalDamage" -- Under 15% Health
 }
 
 local lastPreset = ""
 local activeClientInstances = {}
 
 -- ====================================================================
--- CORE OVERWRITE & ENGINE FUNCTIONALITY
+-- OVERWRITE & ENGINE FUNCTIONALITY
 -- ====================================================================
 
 local function registerPreset(tier, newFolderName)
+	ensureSubFolder(newFolderName)
+
 	if tier == "Default" then Config.SelectedDefault = newFolderName
 	elseif tier == "Minor" then Config.SelectedMinor = newFolderName
-	elseif tier == "Major" then Config.SelectedMajor = newFolderName end
+	elseif tier == "Medium" then Config.SelectedMedium = newFolderName
+	elseif tier == "Major" then Config.SelectedMajor = newFolderName
+	elseif tier == "Critical" then Config.SelectedCritical = newFolderName end
 	
 	lastPreset = "" 
 	if LocalPlayer.Character then
@@ -127,8 +153,16 @@ local function monitorHealth(character)
 		local ratio = human.Health / human.MaxHealth
 		local target = Config.SelectedDefault
 		
-		if ratio <= Config.MajorThreshold then target = Config.SelectedMajor
-		elseif ratio <= Config.MinorThreshold then target = Config.SelectedMinor end
+		-- Evaluates downward through the new 5-tier setup
+		if ratio <= 0.15 then
+			target = Config.SelectedCritical
+		elseif ratio <= 0.30 then
+			target = Config.SelectedMajor
+		elseif ratio <= 0.50 then
+			target = Config.SelectedMedium
+		elseif ratio <= 0.75 then
+			target = Config.SelectedMinor
+		end
 		
 		if target ~= lastPreset then
 			lastPreset = target
@@ -155,7 +189,6 @@ local success, err = pcall(function()
 end)
 if not success then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Custom Touch Drag Handler (Works perfectly on Mobile Screens)
 local function makeMobileDraggable(frame)
 	local dragging, dragInput, dragStart, startPos
 	
@@ -166,9 +199,7 @@ local function makeMobileDraggable(frame)
 			startPos = frame.Position
 			
 			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
 			end)
 		end
 	end)
@@ -202,7 +233,7 @@ ToggleButton.Active = true
 ToggleButton.Parent = ScreenGui
 
 local CircleCorner = Instance.new("UICorner")
-CircleCorner.CornerRadius = UDim.new(1, 0) -- Makes it a perfect circle
+CircleCorner.CornerRadius = UDim.new(1, 0)
 CircleCorner.Parent = ToggleButton
 
 local UIStroke = Instance.new("UIStroke")
@@ -212,11 +243,11 @@ UIStroke.Parent = ToggleButton
 
 makeMobileDraggable(ToggleButton)
 
--- Main Config UI Window
+-- Main Config UI Window (Expanded height to 310 to fit new entries gracefully)
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 300, 0, 260)
-MainFrame.Position = UDim2.new(0.5, -150, 0.4, -130)
+MainFrame.Size = UDim2.new(0, 300, 0, 310)
+MainFrame.Position = UDim2.new(0.5, -150, 0.4, -155)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
@@ -229,12 +260,10 @@ MainCorner.Parent = MainFrame
 
 makeMobileDraggable(MainFrame)
 
--- Toggle Menu visibility on Button Tap
 ToggleButton.MouseButton1Click:Connect(function()
 	MainFrame.Visible = not MainFrame.Visible
 end)
 
--- Window Title Header
 local TitleLabel = Instance.new("TextLabel")
 TitleLabel.Size = UDim2.new(1, 0, 0, 40)
 TitleLabel.BackgroundTransparency = 1
@@ -244,7 +273,6 @@ TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 13
 TitleLabel.Parent = MainFrame
 
--- Rows Container
 local Container = Instance.new("Frame")
 Container.Size = UDim2.new(1, -20, 1, -50)
 Container.Position = UDim2.new(0, 10, 0, 45)
@@ -252,14 +280,13 @@ Container.BackgroundTransparency = 1
 Container.Parent = MainFrame
 
 local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 12)
+Layout.Padding = UDim.new(0, 8)
 Layout.SortOrder = Enum.SortOrder.LayoutOrder
 Layout.Parent = Container
 
--- Helper function to generate input configuration rows
 local function createConfigRow(labelText, placeholderText, tierName, order)
 	local row = Instance.new("Frame")
-	row.Size = UDim2.new(1, 0, 0, 45)
+	row.Size = UDim2.new(1, 0, 0, 42)
 	row.BackgroundTransparency = 1
 	row.LayoutOrder = order
 	row.Parent = Container
@@ -276,7 +303,7 @@ local function createConfigRow(labelText, placeholderText, tierName, order)
 
 	local textBox = Instance.new("TextBox")
 	textBox.Size = UDim2.new(1, -120, 0, 32)
-	textBox.Position = UDim2.new(0, 120, 0, 6)
+	textBox.Position = UDim2.new(0, 120, 0, 5)
 	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 	textBox.BorderSizePixel = 0
 	textBox.Font = Enum.Font.Gotham
@@ -291,7 +318,6 @@ local function createConfigRow(labelText, placeholderText, tierName, order)
 	boxCorner.Parent = textBox
 	textBox.Parent = row
 
-	-- Overwrite logic triggers immediately upon editing text on mobile keyboard
 	textBox.FocusLost:Connect(function()
 		if textBox.Text ~= "" then
 			registerPreset(tierName, textBox.Text)
@@ -299,10 +325,12 @@ local function createConfigRow(labelText, placeholderText, tierName, order)
 	end)
 end
 
--- Build mobile interface entry rows
+-- Rendered rows layout supporting the full 5-tier scaling chain
 createConfigRow("Full Health:", "face acc", "Default", 1)
 createConfigRow("Minor Damage:", "MinorDamage", "Minor", 2)
-createConfigRow("Major Damage:", "MajorDamage", "Major", 3)
+createConfigRow("Medium Damage:", "MediumDamage", "Medium", 3)
+createConfigRow("Major Damage:", "MajorDamage", "Major", 4)
+createConfigRow("Critical Damage:", "CriticalDamage", "Critical", 5)
 
 -- ====================================================================
 -- INITIALIZATION HOOKS
