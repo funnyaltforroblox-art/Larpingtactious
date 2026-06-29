@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (Unified Matrix Customization Engine + Mobile User Interface)
+-- Health-Based Face & Model Customizer (Independent X/Y/Z Scaling + Asset ID Injector Engine)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -18,13 +18,10 @@ local Config = {
 	SelectedCritical = "CriticalDamage" -- <= 15% Health Folder Name
 }
 
--- Central dynamic registry tracking adjustments per tier, per model, per component
--- Format: CustomOffsets[TierFolder][ItemName][ComponentName] = {Data}
 local CustomOffsets = {}
 local lastPreset = ""
 local activeClientInstances = {}
 
--- UI State Tracking variables
 local selectedTierName = Config.SelectedDefault
 local selectedItemName = ""
 local selectedSubPartName = "Handle"
@@ -119,10 +116,9 @@ local function highlightSelectedSubPart()
 	local character = LocalPlayer.Character
 	if not character or selectedItemName == "" then return end
 	
-	-- Search for the physical accessory instance actively attached to the user character
 	for _, inst in ipairs(activeClientInstances) do
-		if inst and inst.Parent and (inst.Name == selectedItemName or inst:FindFirstChild(selectedItemName)) then
-			local targetPartInstance = inst:Name() == selectedSubPartName and inst or inst:FindFirstChild(selectedSubPartName, true)
+		if inst and inst.Parent and inst.Name == selectedItemName then
+			local targetPartInstance = (inst:IsA("BasePart") and inst.Name == selectedSubPartName) and inst or inst:FindFirstChild(selectedSubPartName, true)
 			if not targetPartInstance then
 				for _, d in ipairs(inst:GetDescendants()) do
 					if d:IsA("BasePart") and d.Name == selectedSubPartName then
@@ -331,11 +327,11 @@ local function makeMobileDraggable(guiObject)
 	end)
 end
 
--- Main Matrix Adjuster Framework Layout
+-- Main Adjuster Framework Layout
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 440, 0, 310)
-MainFrame.Position = UDim2.new(0.5, -220, 0.4, -155)
+MainFrame.Size = UDim2.new(0, 440, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -220, 0.4, -160)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
@@ -348,7 +344,7 @@ MainCorner.Parent = MainFrame
 
 makeMobileDraggable(MainFrame)
 
--- Circular Toggle Activation Core Button
+-- Circular Toggle Activation Button
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "FEXToggle"
 ToggleButton.Size = UDim2.new(0, 60, 0, 60)
@@ -379,18 +375,18 @@ ToggleButton.Activated:Connect(function()
 end)
 
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, 0, 0, 40)
+TitleLabel.Size = UDim2.new(1, 0, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "SUB-COMPONENT CONFIGURATION PANEL"
+TitleLabel.Text = "MODEL CONFIGURATION & INJECTOR PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
-TitleLabel.TextSize = 13
+TitleLabel.TextSize = 12
 TitleLabel.Parent = MainFrame
 
--- Scrolling Multi-Column Lists Layout Frame
+-- Scrolling Lists Layout
 local TierSelectionPanel = Instance.new("ScrollingFrame")
-TierSelectionPanel.Size = UDim2.new(0, 120, 1, -60)
-TierSelectionPanel.Position = UDim2.new(0, 10, 0, 45)
+TierSelectionPanel.Size = UDim2.new(0, 120, 1, -100)
+TierSelectionPanel.Position = UDim2.new(0, 10, 0, 40)
 TierSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 TierSelectionPanel.BorderSizePixel = 0
 TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
@@ -398,8 +394,8 @@ TierSelectionPanel.ScrollBarThickness = 3
 TierSelectionPanel.Parent = MainFrame
 
 local ItemSelectionPanel = Instance.new("ScrollingFrame")
-ItemSelectionPanel.Size = UDim2.new(0, 120, 1, -60)
-ItemSelectionPanel.Position = UDim2.new(0, 135, 0, 45)
+ItemSelectionPanel.Size = UDim2.new(0, 120, 1, -100)
+ItemSelectionPanel.Position = UDim2.new(0, 135, 0, 40)
 ItemSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 ItemSelectionPanel.BorderSizePixel = 0
 ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
@@ -407,19 +403,100 @@ ItemSelectionPanel.ScrollBarThickness = 3
 ItemSelectionPanel.Parent = MainFrame
 
 local EditorScroll = Instance.new("ScrollingFrame")
-EditorScroll.Size = UDim2.new(0, 165, 1, -60)
-EditorScroll.Position = UDim2.new(0, 265, 0, 45)
+EditorScroll.Size = UDim2.new(0, 165, 1, -100)
+EditorScroll.Position = UDim2.new(0, 265, 0, 40)
 EditorScroll.BackgroundTransparency = 1
 EditorScroll.BorderSizePixel = 0
-EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
+EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 340)
 EditorScroll.ScrollBarThickness = 3
 EditorScroll.Parent = MainFrame
 
+-- Asset ID Injector Interface Row (Bottom Panel Placement)
+local InjectorFrame = Instance.new("Frame")
+InjectorFrame.Size = UDim2.new(1, -20, 0, 45)
+InjectorFrame.Position = UDim2.new(0, 10, 1, -55)
+InjectorFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+InjectorFrame.BorderSizePixel = 0
+InjectorFrame.Parent = MainFrame
+
+local InjectorCorner = Instance.new("UICorner")
+InjectorCorner.CornerRadius = UDim.new(0, 6)
+InjectorCorner.Parent = InjectorFrame
+
+local IdTextBox = Instance.new("TextBox")
+IdTextBox.Size = UDim2.new(0, 235, 0, 30)
+IdTextBox.Position = UDim2.new(0, 10, 0, 7)
+IdTextBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+IdTextBox.BorderSizePixel = 0
+IdTextBox.Font = Enum.Font.Gotham
+IdTextBox.PlaceholderText = "Enter Asset ID..."
+IdTextBox.Text = ""
+IdTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+IdTextBox.TextSize = 11
+IdTextBox.ClearTextOnFocus = true
+IdTextBox.Parent = InjectorFrame
+
+local IdCorner = Instance.new("UICorner")
+IdCorner.CornerRadius = UDim.new(0, 4)
+IdCorner.Parent = IdTextBox
+
+local InjectBtn = Instance.new("TextButton")
+InjectBtn.Size = UDim2.new(1, -260, 0, 30)
+InjectBtn.Position = UDim2.new(0, 250, 0, 7)
+InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+InjectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+InjectBtn.Text = "DOWNLOAD ID"
+InjectBtn.Font = Enum.Font.GothamBold
+InjectBtn.TextSize = 10
+InjectBtn.Parent = InjectorFrame
+
+local InjectBtnCorner = Instance.new("UICorner")
+InjectBtnCorner.CornerRadius = UDim.new(0, 4)
+InjectBtnCorner.Parent = InjectBtn
+
 local updateTierUI, updateItemUI, updateEditorUI
 
--- Component Sub-Dropdown Core Target
+InjectBtn.Activated:Connect(function()
+	local id = tonumber(IdTextBox.Text)
+	if not id then IdTextBox.Text = "Invalid ID!"; task.wait(1); IdTextBox.Text = ""; return end
+	
+	InjectBtn.Text = "DOWNLOADING..."
+	InjectBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
+	
+	task.spawn(function()
+		local success, assetModel = pcall(function()
+			return game:GetObjects("rbxassetid://" .. id)[1]
+		end)
+		
+		if success and assetModel then
+			local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+			if targetFolder then
+				assetModel.Name = "Asset_" .. tostring(id)
+				assetModel.Parent = targetFolder
+				
+				initializeItemData(selectedTierName, assetModel)
+				selectedItemName = assetModel.Name
+				selectedSubPartName = "Handle"
+				
+				IdTextBox.Text = "Success!"
+				if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
+				updateItemUI()
+				updateEditorUI()
+			end
+		else
+			IdTextBox.Text = "Load Fail!"
+		end
+		
+		task.wait(1.2)
+		InjectBtn.Text = "DOWNLOAD ID"
+		InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+		IdTextBox.Text = ""
+	end)
+end)
+
+-- Component Sub-Dropdown Target
 local compSelectBtn = Instance.new("TextButton")
-compSelectBtn.Size = UDim2.new(1, 0, 0, 28)
+compSelectBtn.Size = UDim2.new(1, 0, 0, 26)
 compSelectBtn.Position = UDim2.new(0, 0, 0, 0)
 compSelectBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 45)
 compSelectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -430,7 +507,7 @@ compSelectBtn.Parent = EditorScroll
 
 local compDropdownScroll = Instance.new("ScrollingFrame")
 compDropdownScroll.Size = UDim2.new(1, 0, 0, 100)
-compDropdownScroll.Position = UDim2.new(0, 0, 0, 30)
+compDropdownScroll.Position = UDim2.new(0, 0, 0, 28)
 compDropdownScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 compDropdownScroll.ZIndex = 5
 compDropdownScroll.Visible = false
@@ -443,7 +520,7 @@ end)
 local inputs = {}
 local function createMatrixInput(labelText, property, yPos)
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(0, 70, 0, 24)
+	label.Size = UDim2.new(0, 70, 0, 22)
 	label.Position = UDim2.new(0, 0, 0, yPos)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamSemibold
@@ -454,7 +531,7 @@ local function createMatrixInput(labelText, property, yPos)
 	label.Parent = EditorScroll
 
 	local textBox = Instance.new("TextBox")
-	textBox.Size = UDim2.new(1, -75, 0, 24)
+	textBox.Size = UDim2.new(1, -75, 0, 22)
 	textBox.Position = UDim2.new(0, 75, 0, yPos)
 	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 	textBox.BorderSizePixel = 0
@@ -477,7 +554,7 @@ local function createMatrixInput(labelText, property, yPos)
 			if val then
 				tierData[selectedItemName][selectedSubPartName][property] = val
 				if LocalPlayer.Character then
-					applyPreset(LocalPlayer.Character, lastPreset) -- Immediate live re-render
+					applyPreset(LocalPlayer.Character, lastPreset)
 				end
 			end
 		end
@@ -485,27 +562,16 @@ local function createMatrixInput(labelText, property, yPos)
 	inputs[property] = textBox
 end
 
+-- Matrix Layout: Offset Rules, Rotation Rules, and Discrete Spatial Scale Controls
 createMatrixInput("Offset X:", "offsetX", 140)
-createMatrixInput("Offset Y:", "offsetY", 170)
-createMatrixInput("Offset Z:", "offsetZ", 200)
-createMatrixInput("Rotate X:", "rotateX", 230)
-createMatrixInput("Rotate Y:", "rotateY", 260)
-createMatrixInput("Rotate Z:", "rotateZ", 290)
-createMatrixInput("Scale Unif:", "scaleX", 320) -- Scales uniformly across structural bounds
-
--- Watchers on uniform inputs to write parallel axes
-inputs["scaleX"].FocusLost:Connect(function()
-	if selectedItemName == "" then return end
-	local tierData = CustomOffsets[selectedTierName]
-	if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
-		local val = tonumber(inputs["scaleX"].Text)
-		if val then
-			tierData[selectedItemName][selectedSubPartName].scaleY = val
-			tierData[selectedItemName][selectedSubPartName].scaleZ = val
-			if LocalPlayer.Character then applyPreset(LocalPlayer.Character, lastPreset) end
-		end
-	end
-end)
+createMatrixInput("Offset Y:", "offsetY", 165)
+createMatrixInput("Offset Z:", "offsetZ", 190)
+createMatrixInput("Rotate X:", "rotateX", 215)
+createMatrixInput("Rotate Y:", "rotateY", 240)
+createMatrixInput("Rotate Z:", "rotateZ", 265)
+createMatrixInput("Scale X:",  "scaleX",  290) -- Independent X Axis
+createMatrixInput("Scale Y:",  "scaleY",  315) -- Independent Y Axis
+createMatrixInput("Scale Z:",  "scaleZ",  340) -- Independent Z Axis
 
 updateEditorUI = function()
 	if selectedItemName == "" then
@@ -515,7 +581,6 @@ updateEditorUI = function()
 	end
 	
 	compSelectBtn.Text = "Part: " .. selectedSubPartName
-	compDropdownScroll.TextColor3 = Color3.fromRGB(255, 255, 255)
 	compDropdownScroll:ClearAllChildren()
 	
 	local dropLayout = Instance.new("UIListLayout")
@@ -556,6 +621,8 @@ updateEditorUI = function()
 		inputs["rotateY"].Text = tostring(pData.rotateY)
 		inputs["rotateZ"].Text = tostring(pData.rotateZ)
 		inputs["scaleX"].Text  = tostring(pData.scaleX)
+		inputs["scaleY"].Text  = tostring(pData.scaleY)
+		inputs["scaleZ"].Text  = tostring(pData.scaleZ)
 	end
 end
 
@@ -638,4 +705,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("Why me?")
+print("Util Loaded")
