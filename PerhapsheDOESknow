@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (Independent X/Y/Z Scaling + Asset ID Injector Engine)
+-- Health-Based Face & Model Customizer (X/Y/Z Scaling + ID Injector + RGB & Saturation Slider Engine)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -72,7 +72,12 @@ local function initializeItemData(tierName, item)
 	
 	if handle then
 		handle.Name = "Handle"
-		itemProfile["Handle"] = {offsetX = 0, offsetY = 0, offsetZ = 0, rotateX = 0, rotateY = 0, rotateZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1}
+		itemProfile["Handle"] = {
+			offsetX = 0, offsetY = 0, offsetZ = 0, 
+			rotateX = 0, rotateY = 0, rotateZ = 0, 
+			scaleX = 1, scaleY = 1, scaleZ = 1,
+			colorR = 255, colorG = 255, colorB = 255, saturation = 1
+		}
 		
 		local partCounter = 1
 		for _, child in ipairs(item:GetDescendants()) do
@@ -93,7 +98,8 @@ local function initializeItemData(tierName, item)
 				itemProfile[child.Name] = {
 					offsetX = 0, offsetY = 0, offsetZ = 0,
 					rotateX = 0, rotateY = 0, rotateZ = 0,
-					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ
+					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ,
+					colorR = 255, colorG = 255, colorB = 255, saturation = 1
 				}
 			end
 		end
@@ -143,6 +149,25 @@ local function highlightSelectedSubPart()
 end
 
 -- ====================================================================
+-- COLOR PROJECTION UTILITY
+-- ====================================================================
+local function applyColorTransform(part, pData)
+	if not pData then return end
+	local baseColor = Color3.fromRGB(pData.colorR or 255, pData.colorG or 255, pData.colorB or 255)
+	
+	if pData.saturation and pData.saturation < 1 then
+		local h, s, v = baseColor:ToHSV()
+		baseColor = Color3.fromHSV(h, s * pData.saturation, v)
+	end
+	
+	part.Color = baseColor
+	local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
+	if mesh then
+		mesh.VertexColor = Vector3.new(baseColor.R, baseColor.G, baseColor.B)
+	end
+end
+
+-- ====================================================================
 -- COUPLING MECHANICAL RE-WELD PIPELINE
 -- ====================================================================
 local function localAttach(character, tierName, item)
@@ -186,18 +211,20 @@ local function localAttach(character, tierName, item)
 				else
 					obj.Size = Vector3.new(pData.scaleX, pData.scaleY, pData.scaleZ)
 				end
+				applyColorTransform(obj, pData)
 			end
 		end
 	end
 	
 	handle.Anchored = false; handle.CanCollide = false; handle.Massless = true
-	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1}
+	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1,colorR=255,colorG=255,colorB=255,saturation=1}
 	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
 	if rootMesh then
 		rootMesh.Scale = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
 	else
 		handle.Size = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
 	end
+	applyColorTransform(handle, rootData)
 
 	for _, obj in ipairs(clone:GetDescendants()) do
 		if obj:IsA("BasePart") and obj ~= handle then
@@ -327,11 +354,11 @@ local function makeMobileDraggable(guiObject)
 	end)
 end
 
--- Main Adjuster Framework Layout
+-- Main Adjuster Framework Layout (Expanded to fit the Color Panel at top-right)
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 440, 0, 320)
-MainFrame.Position = UDim2.new(0.5, -220, 0.4, -160)
+MainFrame.Size = UDim2.new(0, 610, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -305, 0.4, -160)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
@@ -375,12 +402,14 @@ ToggleButton.Activated:Connect(function()
 end)
 
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, 0, 0, 35)
+TitleLabel.Size = UDim2.new(1, -180, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "MODEL CONFIGURATION & INJECTOR PANEL"
+TitleLabel.Text = "MODEL CONFIGURATION & COLOR MATRIX PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 12
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
 TitleLabel.Parent = MainFrame
 
 -- Scrolling Lists Layout
@@ -411,7 +440,21 @@ EditorScroll.CanvasSize = UDim2.new(0, 0, 0, 340)
 EditorScroll.ScrollBarThickness = 3
 EditorScroll.Parent = MainFrame
 
--- Asset ID Injector Interface Row (Bottom Panel Placement)
+-- Top Right RGB Matrix Canvas Panel
+local ColorPanel = Instance.new("Frame")
+ColorPanel.Name = "ColorPanel"
+ColorPanel.Size = UDim2.new(0, 160, 0, 165)
+ColorPanel.Position = UDim2.new(0, 440, 0, 40)
+ColorPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+ColorPanel.BorderSizePixel = 0
+ColorPanel.Visible = false
+ColorPanel.Parent = MainFrame
+
+local ColorPanelCorner = Instance.new("UICorner")
+ColorPanelCorner.CornerRadius = UDim.new(0, 6)
+ColorPanelCorner.Parent = ColorPanel
+
+-- Asset ID Injector Interface Row
 local InjectorFrame = Instance.new("Frame")
 InjectorFrame.Size = UDim2.new(1, -20, 0, 45)
 InjectorFrame.Position = UDim2.new(0, 10, 1, -55)
@@ -424,7 +467,7 @@ InjectorCorner.CornerRadius = UDim.new(0, 6)
 InjectorCorner.Parent = InjectorFrame
 
 local IdTextBox = Instance.new("TextBox")
-IdTextBox.Size = UDim2.new(0, 235, 0, 30)
+IdTextBox.Size = UDim2.new(0, 380, 0, 30)
 IdTextBox.Position = UDim2.new(0, 10, 0, 7)
 IdTextBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 IdTextBox.BorderSizePixel = 0
@@ -441,8 +484,8 @@ IdCorner.CornerRadius = UDim.new(0, 4)
 IdCorner.Parent = IdTextBox
 
 local InjectBtn = Instance.new("TextButton")
-InjectBtn.Size = UDim2.new(1, -260, 0, 30)
-InjectBtn.Position = UDim2.new(0, 250, 0, 7)
+InjectBtn.Size = UDim2.new(1, -405, 0, 30)
+InjectBtn.Position = UDim2.new(0, 400, 0, 7)
 InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
 InjectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 InjectBtn.Text = "DOWNLOAD ID"
@@ -562,25 +605,126 @@ local function createMatrixInput(labelText, property, yPos)
 	inputs[property] = textBox
 end
 
--- Matrix Layout: Offset Rules, Rotation Rules, and Discrete Spatial Scale Controls
 createMatrixInput("Offset X:", "offsetX", 140)
 createMatrixInput("Offset Y:", "offsetY", 165)
 createMatrixInput("Offset Z:", "offsetZ", 190)
 createMatrixInput("Rotate X:", "rotateX", 215)
 createMatrixInput("Rotate Y:", "rotateY", 240)
 createMatrixInput("Rotate Z:", "rotateZ", 265)
-createMatrixInput("Scale X:",  "scaleX",  290) -- Independent X Axis
-createMatrixInput("Scale Y:",  "scaleY",  315) -- Independent Y Axis
-createMatrixInput("Scale Z:",  "scaleZ",  340) -- Independent Z Axis
+createMatrixInput("Scale X:",  "scaleX",  290)
+createMatrixInput("Scale Y:",  "scaleY",  315)
+createMatrixInput("Scale Z:",  "scaleZ",  340)
+
+-- ====================================================================
+-- SLIDER CREATION ENGINE (RGB & SATURATION)
+-- ====================================================================
+local sliders = {}
+local function createColorSlider(name, color, yPos, min, max)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -20, 0, 14)
+	label.Position = UDim2.new(0, 10, 0, yPos)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.Text = name .. ": " .. tostring(max)
+	label.TextColor3 = color
+	label.TextSize = 10
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = ColorPanel
+
+	local track = Instance.new("Frame")
+	track.Size = UDim2.new(1, -20, 0, 6)
+	track.Position = UDim2.new(0, 10, 0, yPos + 16)
+	track.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+	track.BorderSizePixel = 0
+	track.Parent = ColorPanel
+	
+	local trackCorner = Instance.new("UICorner")
+	trackCorner.CornerRadius = UDim.new(1, 0)
+	trackCorner.Parent = track
+
+	local knob = Instance.new("TextButton")
+	knob.Size = UDim2.new(0, 12, 0, 12)
+	knob.Position = UDim2.new(1, -12, 0.5, -6)
+	knob.BackgroundColor3 = color
+	knob.Text = ""
+	knob.Parent = track
+	
+	local knobCorner = Instance.new("UICorner")
+	knobCorner.CornerRadius = UDim.new(1, 0)
+	knobCorner.Parent = knob
+
+	local activeSliding = false
+	
+	local function updateSliderPosition(inputPosition)
+		local relativeX = math.clamp((inputPosition.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		knob.Position = UDim2.new(relativeX, -6, 0.5, -6)
+		
+		local computedValue = min + (relativeX * (max - min))
+		if max > 1 then computedValue = math.floor(computedValue) end
+		
+		label.Text = name .. ": " .. tostring(computedValue)
+		
+		if selectedItemName ~= "" then
+			local tierData = CustomOffsets[selectedTierName]
+			if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
+				tierData[selectedItemName][selectedSubPartName][name] = computedValue
+				if LocalPlayer.Character then
+					applyPreset(LocalPlayer.Character, lastPreset)
+				end
+			end
+		end
+	end
+
+	knob.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			activeSliding = true
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			activeSliding = false
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if activeSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			updateSliderPosition(input.Position)
+		end
+	end)
+	
+	sliders[name] = {knob = knob, label = label, track = track, min = min, max = max}
+end
+
+createColorSlider("colorR", Color3.fromRGB(255, 80, 80), 10, 0, 255)
+createColorSlider("colorG", Color3.fromRGB(80, 255, 80), 48, 0, 255)
+createColorSlider("colorB", Color3.fromRGB(80, 80, 255), 86, 0, 255)
+createColorSlider("saturation", Color3.fromRGB(220, 220, 220), 124, 0, 1)
+
+local function synchronizeSliderPositions(pData)
+	if not pData then return end
+	local targets = {colorR = pData.colorR or 255, colorG = pData.colorG or 255, colorB = pData.colorB or 255, saturation = pData.saturation or 1}
+	
+	for name, val in pairs(targets) do
+		local s = sliders[name]
+		if s then
+			local pct = (val - s.min) / (s.max - s.min)
+			s.knob.Position = UDim2.new(pct, -6, 0.5, -6)
+			s.label.Text = name .. ": " .. tostring(val)
+		end
+	end
+end
 
 updateEditorUI = function()
 	if selectedItemName == "" then
 		compSelectBtn.Text = "No Item Selected"
+		ColorPanel.Visible = false
 		for _, box in pairs(inputs) do box.Text = "" end
 		return
 	end
 	
 	compSelectBtn.Text = "Part: " .. selectedSubPartName
+	ColorPanel.Visible = true
 	compDropdownScroll:ClearAllChildren()
 	
 	local dropLayout = Instance.new("UIListLayout")
@@ -623,6 +767,7 @@ updateEditorUI = function()
 		inputs["scaleX"].Text  = tostring(pData.scaleX)
 		inputs["scaleY"].Text  = tostring(pData.scaleY)
 		inputs["scaleZ"].Text  = tostring(pData.scaleZ)
+		synchronizeSliderPositions(pData)
 	end
 end
 
@@ -705,4 +850,4 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(monitorHealth)
 
-print("ghostofthegooen")
+print("Util Loadddddded")
