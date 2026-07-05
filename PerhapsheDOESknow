@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, and Save Slots)
+-- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, and Clearable Save Slots)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -212,7 +212,7 @@ local function highlightSelectedSubPart()
 end
 
 -- ====================================================================
--- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL AXIS FIX INTEGRATED)
+-- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL AXIS ALIGNED)
 -- ====================================================================
 local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
@@ -591,9 +591,9 @@ local function drawSaveSlotsInterface()
 		loadBtn.BackgroundColor3 = isEmpty and Color3.fromRGB(45, 45, 50) or Color3.fromRGB(0, 100, 180)
 		loadBtn.Font = Enum.Font.GothamBold
 		loadBtn.Text = "LOAD"
-		loadBtn.TextColor3 = isEmpty and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(255, 255, 255)
+		loadBtn.TextColor3 = isEmpty and Color3.fromRGB(160, 160, 160) or Color3.fromRGB(255, 255, 255)
 		loadBtn.TextSize = 9
-		loadBtn.AutoButtonColor = not isEmpty
+		loadBtn.AutoButtonColor = true
 		loadBtn.Parent = card
 		
 		local lCc = Instance.new("UICorner")
@@ -629,28 +629,40 @@ local function drawSaveSlotsInterface()
 			saveBtn.Text = "SAVE"
 		end)
 		
-		-- Load action execution mapping
+		-- Load action execution mapping (Allows loading empty slots to safely wipe/clear configuration layout)
 		loadBtn.Activated:Connect(function()
-			if isEmpty then return end
+			if isEmpty then
+				CustomOffsets = {}
+				AssetIdsToLoad = {}
+				
+				local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
+				for _, tName in ipairs(tiers) do
+					CustomOffsets[tName] = {}
+					AssetIdsToLoad[tName] = {}
+				end
+			else
+				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
+				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds))
+			end
 			
-			CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
-			AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds))
-			
-			-- Wipe and re-download workspace folders cleanly
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
 				folder:ClearAllChildren()
 			end
 			
 			saveProfileData()
 			
-			-- Rehydrate
-			for tierName, idList in pairs(AssetIdsToLoad) do
-				for _, id in ipairs(idList) do
-					injectAssetId(id, tierName, true)
+			if not isEmpty then
+				for tierName, idList in pairs(AssetIdsToLoad) do
+					for _, id in ipairs(idList) do
+						injectAssetId(id, tierName, true)
+					end
 				end
+				task.wait(0.2)
+			else
+				selectedItemName = ""
+				selectedSubPartName = "Handle"
 			end
 			
-			task.wait(0.2)
 			if isPreviewingMode then
 				runUpdatePreviewCycle()
 			elseif LocalPlayer.Character then
@@ -662,7 +674,7 @@ local function drawSaveSlotsInterface()
 			updateItemUI()
 			updateEditorUI()
 			
-			loadBtn.Text = "LOADED!"
+			loadBtn.Text = isEmpty and "CLEARED!" or "LOADED!"
 			task.wait(0.8)
 			loadBtn.Text = "LOAD"
 		end)
@@ -1017,4 +1029,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("AYYYY IT WORKED")
+print("Util Loaded Successfully.")
