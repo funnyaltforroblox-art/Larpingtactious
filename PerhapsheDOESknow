@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (With Local-Axis Rotation, Save & Preview)
+-- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, and Save Slots)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -24,6 +24,7 @@ local Config = {
 
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
+local SaveSlots = {} -- Matrix for slots 1-5
 local lastPreset = ""
 local activeClientInstances = {}
 local isPreviewingMode = false 
@@ -44,7 +45,8 @@ local function saveProfileData()
 			if writefile then
 				local package = {
 					Offsets = CustomOffsets,
-					AssetIds = AssetIdsToLoad
+					AssetIds = AssetIdsToLoad,
+					Slots = SaveSlots
 				}
 				local jsonString = HttpService:JSONEncode(package)
 				writefile(FILE_NAME, jsonString)
@@ -71,14 +73,10 @@ local function loadProfileData()
 			return HttpService:JSONDecode(result)
 		end)
 		if successParse and type(parsedData) == "table" then
-			if parsedData.Offsets and parsedData.AssetIds then
-				CustomOffsets = parsedData.Offsets
-				AssetIdsToLoad = parsedData.AssetIds
-			else
-				CustomOffsets = parsedData
-				AssetIdsToLoad = {}
-			end
-			print("[FEX Local Engine]: Successfully loaded presets from workspace/" .. FILE_NAME)
+			CustomOffsets = parsedData.Offsets or {}
+			AssetIdsToLoad = parsedData.AssetIds or {}
+			SaveSlots = parsedData.Slots or {}
+			print("[FEX Local Engine]: Successfully loaded presets and slots from workspace/" .. FILE_NAME)
 			return
 		end
 	end
@@ -86,6 +84,13 @@ local function loadProfileData()
 end
 
 loadProfileData()
+
+-- Ensure slots structure is initialized safely
+for i = 1, 5 do
+	if not SaveSlots[tostring(i)] then
+		SaveSlots[tostring(i)] = { Empty = true }
+	end
+end
 
 -- ====================================================================
 -- DIRECTORY SETUP LAYER
@@ -134,8 +139,7 @@ local function initializeItemData(tierName, item)
 		itemProfile["Handle"] = {
 			offsetX = 0, offsetY = 0, offsetZ = 0, 
 			rotateX = 0, rotateY = 0, rotateZ = 0, 
-			scaleX = 1, scaleY = 1, scaleZ = 1,
-			colorR = 255, colorG = 255, colorB = 255, saturation = 1
+			scaleX = 1, scaleY = 1, scaleZ = 1
 		}
 		
 		local partCounter = 1
@@ -157,8 +161,7 @@ local function initializeItemData(tierName, item)
 				itemProfile[child.Name] = {
 					offsetX = 0, offsetY = 0, offsetZ = 0,
 					rotateX = 0, rotateY = 0, rotateZ = 0,
-					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ,
-					colorR = 255, colorG = 255, colorB = 255, saturation = 1
+					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ
 				}
 			end
 		end
@@ -209,26 +212,7 @@ local function highlightSelectedSubPart()
 end
 
 -- ====================================================================
--- COLOR PROJECTION UTILITY
--- ====================================================================
-local function applyColorTransform(part, pData)
-	if not pData then return end
-	local baseColor = Color3.fromRGB(pData.colorR or 255, pData.colorG or 255, pData.colorB or 255)
-	
-	if pData.saturation and pData.saturation < 1 then
-		local h, s, v = baseColor:ToHSV()
-		baseColor = Color3.fromHSV(h, s * pData.saturation, v)
-	end
-	
-	part.Color = baseColor
-	local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
-	if mesh then
-		mesh.VertexColor = Vector3.new(baseColor.R, baseColor.G, baseColor.B)
-	end
-end
-
--- ====================================================================
--- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL-AXIS ROTATION FIXED)
+-- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL AXIS FIX INTEGRATED)
 -- ====================================================================
 local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
@@ -236,6 +220,7 @@ local function localAttach(character, tierName, item)
 	
 	initializeItemData(tierName, item)
 	local itemData = CustomOffsets[tierName][item.Name]
+	if not itemData then return end
 	
 	local clone = item:Clone()
 	local handle = clone.Name == "Handle" and clone or clone:FindFirstChild("Handle") or clone:FindFirstChildWhichIsA("BasePart", true)
@@ -267,26 +252,23 @@ local function localAttach(character, tierName, item)
 			if pData then
 				local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
 				if mesh then
-					mesh.Scale = Vector3.new(pData.scaleX, pData.scaleY, pData.scaleZ)
+					mesh.Scale = Vector3.new(pData.scaleX or 1, pData.scaleY or 1, pData.scaleZ or 1)
 				else
-					obj.Size = Vector3.new(pData.scaleX, pData.scaleY, pData.scaleZ)
+					obj.Size = Vector3.new(pData.scaleX or 1, pData.scaleY or 1, pData.scaleZ or 1)
 				end
-				applyColorTransform(obj, pData)
 			end
 		end
 	end
 	
 	handle.Anchored = false; handle.CanCollide = false; handle.Massless = true
-	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1,colorR=255,colorG=255,colorB=255,saturation=1}
+	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1}
 	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
 	if rootMesh then
-		rootMesh.Scale = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
+		rootMesh.Scale = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
 	else
-		handle.Size = Vector3.new(rootData.scaleX, rootData.scaleY, rootData.scaleZ)
+		handle.Size = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
 	end
-	applyColorTransform(handle, rootData)
 
-	-- Apply self-axis rotation to component child parts
 	for _, obj in ipairs(clone:GetDescendants()) do
 		if obj:IsA("BasePart") and obj ~= handle then
 			local pData = itemData[obj.Name] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0}
@@ -295,10 +277,9 @@ local function localAttach(character, tierName, item)
 			innerWeld.Part0 = obj; innerWeld.Part1 = handle
 			
 			local originalLocalCFrame = structuralOffsets[obj.Name] or CFrame.new()
-			local customPosOffset = CFrame.new(pData.offsetX, pData.offsetY, pData.offsetZ)
-			local customRotOffset = CFrame.Angles(math.rad(pData.rotateX), math.rad(pData.rotateY), math.rad(pData.rotateZ))
+			local customPosOffset = CFrame.new(pData.offsetX or 0, pData.offsetY or 0, pData.offsetZ or 0)
+			local customRotOffset = CFrame.Angles(math.rad(pData.rotateX or 0), math.rad(pData.rotateY or 0), math.rad(pData.rotateZ or 0))
 			
-			-- Multiplied rotation after original position keeps it rotating on its own axis center
 			innerWeld.C0 = originalLocalCFrame:Inverse() * customPosOffset * customRotOffset
 			innerWeld.Parent = obj
 		end
@@ -316,11 +297,9 @@ local function localAttach(character, tierName, item)
 	rootWeld.Name = "AccessoryWeld"
 	rootWeld.Part0 = handle; rootWeld.Part1 = head
 	
-	local positionOffset = CFrame.new(rootData.offsetX, rootData.offsetY, rootData.offsetZ)
-	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX), math.rad(rootData.rotateY), math.rad(rootData.rotateZ))
+	local positionOffset = CFrame.new(rootData.offsetX or 0, rootData.offsetY or 0, rootData.offsetZ or 0)
+	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX or 0), math.rad(rootData.rotateY or 0), math.rad(rootData.rotateZ or 0))
 	
-	-- FIXED: Swapped C0 multiplication order. 
-	-- This isolates rotation onto the Handle's localized object center instead of dragging around the head orbit.
 	rootWeld.C0 = positionOffset * rotationOffset
 	rootWeld.Parent = handle
 	
@@ -551,18 +530,144 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 15)
 end)
 
-local ColorPanel = Instance.new("Frame")
-ColorPanel.Name = "ColorPanel"
-ColorPanel.Size = UDim2.new(0, 160, 0, 165)
-ColorPanel.Position = UDim2.new(0, 440, 0, 40)
-ColorPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-ColorPanel.BorderSizePixel = 0
-ColorPanel.Visible = false
-ColorPanel.Parent = MainFrame
+-- ====================================================================
+-- SAVE SLOTS ENGINE PANEL (REPLACED COLOR SLIDERS)
+-- ====================================================================
+local SlotFramePanel = Instance.new("ScrollingFrame")
+SlotFramePanel.Name = "SlotFramePanel"
+SlotFramePanel.Size = UDim2.new(0, 160, 0, 215)
+SlotFramePanel.Position = UDim2.new(0, 440, 0, 40)
+SlotFramePanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+SlotFramePanel.BorderSizePixel = 0
+SlotFramePanel.CanvasSize = UDim2.new(0, 0, 0, 260)
+SlotFramePanel.ScrollBarThickness = 2
+SlotFramePanel.Parent = MainFrame
 
-local ColorPanelCorner = Instance.new("UICorner")
-ColorPanelCorner.CornerRadius = UDim.new(0, 6)
-ColorPanelCorner.Parent = ColorPanel
+local SlotPanelCorner = Instance.new("UICorner")
+SlotPanelCorner.CornerRadius = UDim.new(0, 6)
+SlotPanelCorner.Parent = SlotFramePanel
+
+local SlotListLayout = Instance.new("UIListLayout")
+SlotListLayout.Padding = UDim.new(0, 6)
+SlotListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+SlotListLayout.Parent = SlotFramePanel
+
+local updateTierUI, updateItemUI, updateEditorUI
+
+local function drawSaveSlotsInterface()
+	for _, child in ipairs(SlotFramePanel:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	
+	for i = 1, 5 do
+		local slotKey = tostring(i)
+		local slotData = SaveSlots[slotKey]
+		local isEmpty = slotData.Empty == true
+		
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(0, 144, 0, 44)
+		card.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+		card.BorderSizePixel = 0
+		card.Parent = SlotFramePanel
+		
+		local cardCorner = Instance.new("UICorner")
+		cardCorner.CornerRadius = UDim.new(0, 4)
+		cardCorner.Parent = card
+		
+		local statusLabel = Instance.new("TextLabel")
+		statusLabel.Size = UDim2.new(1, -10, 0, 16)
+		statusLabel.Position = UDim2.new(0, 6, 0, 2)
+		statusLabel.BackgroundTransparency = 1
+		statusLabel.Font = Enum.Font.GothamBold
+		statusLabel.Text = "SLOT " .. slotKey .. (isEmpty and " [EMPTY]" or " [SAVED]")
+		statusLabel.TextColor3 = isEmpty and Color3.fromRGB(130, 130, 140) or Color3.fromRGB(0, 255, 150)
+		statusLabel.TextSize = 9
+		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+		statusLabel.Parent = card
+		
+		local loadBtn = Instance.new("TextButton")
+		loadBtn.Size = UDim2.new(0, 62, 0, 18)
+		loadBtn.Position = UDim2.new(0, 6, 0, 20)
+		loadBtn.BackgroundColor3 = isEmpty and Color3.fromRGB(45, 45, 50) or Color3.fromRGB(0, 100, 180)
+		loadBtn.Font = Enum.Font.GothamBold
+		loadBtn.Text = "LOAD"
+		loadBtn.TextColor3 = isEmpty and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(255, 255, 255)
+		loadBtn.TextSize = 9
+		loadBtn.AutoButtonColor = not isEmpty
+		loadBtn.Parent = card
+		
+		local lCc = Instance.new("UICorner")
+		lCc.CornerRadius = UDim.new(0, 3)
+		lCc.Parent = loadBtn
+		
+		local saveBtn = Instance.new("TextButton")
+		saveBtn.Size = UDim2.new(0, 62, 0, 18)
+		saveBtn.Position = UDim2.new(0, 76, 0, 20)
+		saveBtn.BackgroundColor3 = Color3.fromRGB(150, 90, 0)
+		saveBtn.Font = Enum.Font.GothamBold
+		saveBtn.Text = "SAVE"
+		saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		saveBtn.TextSize = 9
+		saveBtn.Parent = card
+		
+		local sCc = Instance.new("UICorner")
+		sCc.CornerRadius = UDim.new(0, 3)
+		sCc.Parent = saveBtn
+		
+		-- Save action execution mapping
+		saveBtn.Activated:Connect(function()
+			SaveSlots[slotKey] = {
+				Empty = false,
+				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
+				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad))
+			}
+			saveProfileData()
+			drawSaveSlotsInterface()
+			
+			saveBtn.Text = "DONE!"
+			task.wait(0.8)
+			saveBtn.Text = "SAVE"
+		end)
+		
+		-- Load action execution mapping
+		loadBtn.Activated:Connect(function()
+			if isEmpty then return end
+			
+			CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
+			AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds))
+			
+			-- Wipe and re-download workspace folders cleanly
+			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
+				folder:ClearAllChildren()
+			end
+			
+			saveProfileData()
+			
+			-- Rehydrate
+			for tierName, idList in pairs(AssetIdsToLoad) do
+				for _, id in ipairs(idList) do
+					injectAssetId(id, tierName, true)
+				end
+			end
+			
+			task.wait(0.2)
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			elseif LocalPlayer.Character then
+				lastPreset = ""
+				forceRecalculateHealthPreset(LocalPlayer.Character)
+			end
+			
+			updateTierUI()
+			updateItemUI()
+			updateEditorUI()
+			
+			loadBtn.Text = "LOADED!"
+			task.wait(0.8)
+			loadBtn.Text = "LOAD"
+		end)
+	end
+end
 
 local InjectorFrame = Instance.new("Frame")
 InjectorFrame.Size = UDim2.new(1, -20, 0, 45)
@@ -605,8 +710,6 @@ InjectBtn.Parent = InjectorFrame
 local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
-
-local updateTierUI, updateItemUI, updateEditorUI
 
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
@@ -753,118 +856,14 @@ createMatrixInput("Scale X:",  "scaleX",  16)
 createMatrixInput("Scale Y:",  "scaleY",  17)
 createMatrixInput("Scale Z:",  "scaleZ",  18)
 
-local sliders = {}
-local function createColorSlider(name, color, yPos, min, max)
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(1, -20, 0, 14)
-	label.Position = UDim2.new(0, 10, 0, yPos)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.Text = name .. ": " .. tostring(max)
-	label.TextColor3 = color
-	label.TextSize = 10
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = ColorPanel
-
-	local track = Instance.new("Frame")
-	track.Size = UDim2.new(1, -20, 0, 6)
-	track.Position = UDim2.new(0, 10, 0, yPos + 16)
-	track.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
-	track.BorderSizePixel = 0
-	track.Parent = ColorPanel
-	
-	local trackCorner = Instance.new("UICorner")
-	trackCorner.CornerRadius = UDim.new(1, 0)
-	trackCorner.Parent = track
-
-	local knob = Instance.new("TextButton")
-	knob.Size = UDim2.new(0, 12, 0, 12)
-	knob.Position = UDim2.new(1, -12, 0.5, -6)
-	knob.BackgroundColor3 = color
-	knob.Text = ""
-	knob.Parent = track
-	
-	local knobCorner = Instance.new("UICorner")
-	knobCorner.CornerRadius = UDim.new(1, 0)
-	knobCorner.Parent = knob
-
-	local activeSliding = false
-	
-	local function updateSliderPosition(inputPosition)
-		local relativeX = math.clamp((inputPosition.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-		knob.Position = UDim2.new(relativeX, -6, 0.5, -6)
-		
-		local computedValue = min + (relativeX * (max - min))
-		if max > 1 then computedValue = math.floor(computedValue) end
-		
-		label.Text = name .. ": " .. tostring(computedValue)
-		
-		if selectedItemName ~= "" then
-			local tierData = CustomOffsets[selectedTierName]
-			if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
-				tierData[selectedItemName][selectedSubPartName][name] = computedValue
-				if isPreviewingMode then
-					runUpdatePreviewCycle()
-				elseif LocalPlayer.Character then
-					applyPreset(LocalPlayer.Character, lastPreset)
-				end
-			end
-		end
-	end
-
-	knob.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			activeSliding = true
-		end
-	end)
-
-	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			if activeSliding then
-				activeSliding = false
-				saveProfileData()
-			end
-		end
-	end)
-
-	UserInputService.InputChanged:Connect(function(input)
-		if activeSliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			updateSliderPosition(input.Position)
-		end
-	end)
-	
-	sliders[name] = {knob = knob, label = label, track = track, min = min, max = max}
-end
-
-createColorSlider("colorR", Color3.fromRGB(255, 80, 80), 10, 0, 255)
-createColorSlider("colorG", Color3.fromRGB(80, 255, 80), 48, 0, 255)
-createColorSlider("colorB", Color3.fromRGB(80, 80, 255), 86, 0, 255)
-createColorSlider("saturation", Color3.fromRGB(220, 220, 220), 124, 0, 1)
-
-local function synchronizeSliderPositions(pData)
-	if not pData then return end
-	local targets = {colorR = pData.colorR or 255, colorG = pData.colorG or 255, colorB = pData.colorB or 255, saturation = pData.saturation or 1}
-	
-	for name, val in pairs(targets) do
-		local s = sliders[name]
-		if s then
-			local pct = (val - s.min) / (s.max - s.min)
-			s.knob.Position = UDim2.new(pct, -6, 0.5, -6)
-			s.label.Text = name .. ": " .. tostring(val)
-		end
-	end
-end
-
 updateEditorUI = function()
 	if selectedItemName == "" then
 		compSelectBtn.Text = "No Item Selected"
-		ColorPanel.Visible = false
 		for _, box in pairs(inputs) do box.Text = "" end
 		return
 	end
 	
 	compSelectBtn.Text = "Part: " .. selectedSubPartName
-	ColorPanel.Visible = true
 	compDropdownScroll:ClearAllChildren()
 	
 	local dropLayout = Instance.new("UIListLayout")
@@ -898,16 +897,15 @@ updateEditorUI = function()
 	
 	local pData = itemProfile[selectedSubPartName]
 	if pData then
-		inputs["offsetX"].Text = tostring(pData.offsetX)
-		inputs["offsetY"].Text = tostring(pData.offsetY)
-		inputs["offsetZ"].Text = tostring(pData.offsetZ)
-		inputs["rotateX"].Text = tostring(pData.rotateX)
-		inputs["rotateY"].Text = tostring(pData.rotateY)
-		inputs["rotateZ"].Text = tostring(pData.rotateZ)
-		inputs["scaleX"].Text  = tostring(pData.scaleX)
-		inputs["scaleY"].Text  = tostring(pData.scaleY)
-		inputs["scaleZ"].Text  = tostring(pData.scaleZ)
-		synchronizeSliderPositions(pData)
+		inputs["offsetX"].Text = tostring(pData.offsetX or 0)
+		inputs["offsetY"].Text = tostring(pData.offsetY or 0)
+		inputs["offsetZ"].Text = tostring(pData.offsetZ or 0)
+		inputs["rotateX"].Text = tostring(pData.rotateX or 0)
+		inputs["rotateY"].Text = tostring(pData.rotateY or 0)
+		inputs["rotateZ"].Text = tostring(pData.rotateZ or 0)
+		inputs["scaleX"].Text  = tostring(pData.scaleX or 1)
+		inputs["scaleY"].Text  = tostring(pData.scaleY or 1)
+		inputs["scaleZ"].Text  = tostring(pData.scaleZ or 1)
 	end
 end
 
@@ -1003,6 +1001,7 @@ end
 updateTierUI()
 updateItemUI()
 updateEditorUI()
+drawSaveSlotsInterface()
 
 batchRehydrateSavedAssets()
 
@@ -1018,4 +1017,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded with Local Axis Joint Rotation Engine")
+print("AYYYY IT WORKED")
