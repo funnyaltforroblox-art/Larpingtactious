@@ -36,6 +36,9 @@ local currentHighlightBox = nil
 
 local injectAssetId
 
+-- Tracker for the currently active confirmation slot
+local activeConfirmSlot = nil
+
 -- ====================================================================
 -- LOCAL FILE SYSTEM SAVE / LOAD PIPELINE
 -- ====================================================================
@@ -531,7 +534,7 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 end)
 
 -- ====================================================================
--- SAVE SLOTS ENGINE PANEL (REPLACED COLOR SLIDERS)
+-- SAVE SLOTS ENGINE PANEL (WITH CONFIRMATION GUARD)
 -- ====================================================================
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
@@ -614,27 +617,59 @@ local function drawSaveSlotsInterface()
 		sCc.CornerRadius = UDim.new(0, 3)
 		sCc.Parent = saveBtn
 		
-		-- Save action execution mapping
+		-- Save action execution mapping with Two-Step Confirmation Guard
 		saveBtn.Activated:Connect(function()
-			SaveSlots[slotKey] = {
-				Empty = false,
-				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
-				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad))
-			}
-			saveProfileData()
-			drawSaveSlotsInterface()
+			-- Clear any load buttons confirmation labels instantly
+			activeConfirmSlot = nil 
 			
-			saveBtn.Text = "DONE!"
-			task.wait(0.8)
-			saveBtn.Text = "SAVE"
+			if activeConfirmSlot ~= slotKey .. "_save" then
+				-- Step 1: Request Confirmation
+				activeConfirmSlot = slotKey .. "_save"
+				drawSaveSlotsInterface() -- Reset any other active confirmations across lists
+				
+				-- Find our newly drawn button copy to apply the alert visual states
+				for _, element in ipairs(SlotFramePanel:GetChildren()) do
+					if element:IsA("Frame") and element:FindFirstChild("SLOT " .. slotKey) then
+						local targetSave = element:FindFirstChild("SAVE") or element:FindFirstChildWhichIsA("TextButton")
+						if targetSave and targetSave.Position.X.Offset > 50 then
+							targetSave.Text = "CONFIRM?"
+							targetSave.BackgroundColor3 = Color3.fromRGB(190, 50, 30)
+						end
+					end
+				end
+			else
+				-- Step 2: Confirmed execution write layer
+				activeConfirmSlot = nil
+				SaveSlots[slotKey] = {
+					Empty = false,
+					Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
+					AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad))
+				}
+				saveProfileData()
+				drawSaveSlotsInterface()
+				
+				-- Access instance visual feedback
+				for _, element in ipairs(SlotFramePanel:GetChildren()) do
+					if element:IsA("Frame") and element:FindFirstChild("SLOT " .. slotKey) then
+						local targetSave = element:FindFirstChild("SAVE") or element:FindFirstChildWhichIsA("TextButton")
+						if targetSave and targetSave.Position.X.Offset > 50 then
+							targetSave.Text = "SAVED!"
+							targetSave.BackgroundColor3 = Color3.fromRGB(0, 150, 80)
+							task.wait(0.8)
+							drawSaveSlotsInterface()
+						end
+					end
+				end
+			end
 		end)
 		
-		-- Load action execution mapping (Allows loading empty slots to safely wipe/clear configuration layout)
+		-- Load action execution mapping
 		loadBtn.Activated:Connect(function()
+			activeConfirmSlot = nil -- Dismiss pending save alerts
+			
 			if isEmpty then
 				CustomOffsets = {}
 				AssetIdsToLoad = {}
-				
 				local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
 				for _, tName in ipairs(tiers) do
 					CustomOffsets[tName] = {}
@@ -1029,4 +1064,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Successfully.")
+print("Util Loaded Succes338383883ly.")
