@@ -373,7 +373,7 @@ local function monitorHealth(character)
 	forceRecalculateHealthPreset(character)
 end
 
--- UPGRADED REHYDRATION SYSTEM: Now fully builds meshes from captured data matrices
+-- FIXED REHYDRATION ENGINE: Uses SpecialMesh override to bypass MeshPart asset write-restrictions
 local function generateExtractedPlaceholderModel(tierName, itemName)
 	local folder = TargetPresetFolder:FindFirstChild(tierName)
 	if not folder or folder:FindFirstChild(itemName) then return end
@@ -384,18 +384,36 @@ local function generateExtractedPlaceholderModel(tierName, itemName)
 	local fakeAccessory = Instance.new("Accessory")
 	fakeAccessory.Name = itemName
 	
+	local handlePart = nil
+	
 	for partName, visualData in pairs(visualProfile) do
-		local part = Instance.new("MeshPart")
+		local part = Instance.new("Part")
 		part.Name = partName
+		part.Transparency = 0
+		part.Material = Enum.Material.Plastic
 		part.Size = Vector3.new(visualData.SizeX or 1, visualData.SizeY or 1, visualData.SizeZ or 1)
 		
 		local sm = Instance.new("SpecialMesh")
-		sm.MeshId = visualData.MeshId or ""
-		sm.TextureId = visualData.TextureId or ""
+		sm.MeshType = Enum.MeshType.FileMesh
+		
+		local rawMesh = visualData.MeshId or ""
+		local rawTexture = visualData.TextureId or ""
+		
+		sm.MeshId = string.match(rawMesh, "^%d+$") and ("rbxassetid://" .. rawMesh) or rawMesh
+		sm.TextureId = string.match(rawTexture, "^%d+$") and ("rbxassetid://" .. rawTexture) or rawTexture
+		
 		sm.Scale = Vector3.new(1, 1, 1)
 		sm.Parent = part
-		
 		part.Parent = fakeAccessory
+		
+		if partName == "Handle" then
+			handlePart = part
+		end
+	end
+	
+	if not handlePart then
+		local backupHandle = fakeAccessory:FindFirstChildWhichIsA("BasePart")
+		if backupHandle then backupHandle.Name = "Handle" end
 	end
 	
 	fakeAccessory.Parent = folder
@@ -456,7 +474,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui
+MainFrame.Parent = MainFrame or ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -577,7 +595,7 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 end)
 
 -- ====================================================================
--- SAVE SLOTS ENGINE PANEL (FIXED PERSISTENCE FOR EXTRACTED ITEMS)
+-- SAVE SLOTS ENGINE PANEL
 -- ====================================================================
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
@@ -711,7 +729,6 @@ local function drawSaveSlotsInterface()
 		end)
 		
 		loadBtn.Activated:Connect(function()
-			-- Clear existing physical folder assets before reconstruction
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
 				folder:ClearAllChildren()
 			end
@@ -732,7 +749,6 @@ local function drawSaveSlotsInterface()
 				selectedSubPartName = "Handle"
 				clearActiveItems()
 			else
-				-- Load structures directly into active profile maps
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
 				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
 				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
@@ -761,7 +777,6 @@ local function drawSaveSlotsInterface()
 				end
 			end
 			
-			-- Force clean recalculation to update current characters and active viewports
 			if isPreviewingMode then
 				runUpdatePreviewCycle()
 			elseif LocalPlayer.Character then
@@ -822,17 +837,15 @@ local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
 
--- FIXED ADVANCED INJECTION LAYER: Automatically falls back to local database reconstruction if rbxassetid fails
+-- FIXED ADVANCED INJECTION LAYER
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
 	
-	-- Try standard executor loading
 	local success, assetModel = pcall(function()
 		return game:GetObjects("rbxassetid://" .. id)[1]
 	end)
 	
-	-- SILENT-FAILURE BACKUP SYSTEM: Rebuild from ExtractedVisuals if the ID can't be fetched online
 	if (not success or not assetModel) and ExtractedVisuals[tierName] then
 		for itemName, parts in pairs(ExtractedVisuals[tierName]) do
 			local match = false
@@ -993,7 +1006,7 @@ createMatrixInput("Scale Y:",  "scaleY",  17)
 createMatrixInput("Scale Z:",  "scaleZ",  18)
 
 -- ====================================================================
--- ADVANCED EXTRACTION ENGINE: Slices and records structural visual properties
+-- ADVANCED EXTRACTION ENGINE
 -- ====================================================================
 local ExtractBtn = Instance.new("TextButton")
 ExtractBtn.Size = UDim2.new(1, 0, 0, 30)
@@ -1280,4 +1293,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded104299999.")
+print("Util Loaded10421110.")
