@@ -24,6 +24,7 @@ local Config = {
 
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
+local ExtractedNamesToLoad = {} -- NEW: Explicit tracking for extracted item names to enforce persistence
 local SaveSlots = {} -- Matrix for slots 1-5
 local SlotNames = {} -- Custom mapping for user-renamed slots
 local lastPreset = ""
@@ -47,6 +48,7 @@ local function saveProfileData()
 				local package = {
 					Offsets = CustomOffsets,
 					AssetIds = AssetIdsToLoad,
+					ExtractedNames = ExtractedNamesToLoad,
 					Slots = SaveSlots,
 					SlotNames = SlotNames
 				}
@@ -77,6 +79,7 @@ local function loadProfileData()
 		if successParse and type(parsedData) == "table" then
 			CustomOffsets = parsedData.Offsets or {}
 			AssetIdsToLoad = parsedData.AssetIds or {}
+			ExtractedNamesToLoad = parsedData.ExtractedNames or {}
 			SaveSlots = parsedData.Slots or {}
 			SlotNames = parsedData.SlotNames or {}
 			print("[FEX Local Engine]: Successfully loaded presets and slots from workspace/" .. FILE_NAME)
@@ -125,6 +128,7 @@ local function ensureSubFolder(name)
 	end
 	if not CustomOffsets[name] then CustomOffsets[name] = {} end
 	if not AssetIdsToLoad[name] then AssetIdsToLoad[name] = {} end
+	if not ExtractedNamesToLoad[name] then ExtractedNamesToLoad[name] = {} end
 end
 
 ensureSubFolder(Config.SelectedDefault)
@@ -364,6 +368,34 @@ local function monitorHealth(character)
 	forceRecalculateHealthPreset(character)
 end
 
+-- NEW: Helper utility function to programmatically rebuild raw structural item instances for extracted items that lack a catalog web id asset context
+local function generateExtractedPlaceholderModel(tierName, itemName)
+	local folder = TargetPresetFolder:FindFirstChild(tierName)
+	if not folder or folder:FindFirstChild(itemName) then return end
+	
+	local itemProfile = CustomOffsets[tierName] and CustomOffsets[tierName][itemName]
+	if not itemProfile then return end
+	
+	local fakeAccessory = Instance.new("Accessory")
+	fakeAccessory.Name = itemName
+	
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(1, 1, 1)
+	handle.Parent = fakeAccessory
+	
+	for componentName, _ in pairs(itemProfile) do
+		if componentName ~= "Handle" then
+			local componentPart = Instance.new("Part")
+			componentPart.Name = componentName
+			componentPart.Size = Vector3.new(1, 1, 1)
+			componentPart.Parent = fakeAccessory
+		end
+	end
+	
+	fakeAccessory.Parent = folder
+end
+
 -- ====================================================================
 -- MOBILE DRAG AND CONTROL GUI ENGINE
 -- ====================================================================
@@ -419,7 +451,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui
+MainFrame.Parent = MainFrame
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -657,7 +689,8 @@ local function drawSaveSlotsInterface()
 			SaveSlots[slotKey] = {
 				Empty = false,
 				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
-				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad))
+				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad)),
+				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad)) -- FIX: Enforce matrix clone context to active slot profiles
 			}
 			saveProfileData()
 			drawSaveSlotsInterface()
@@ -680,14 +713,17 @@ local function drawSaveSlotsInterface()
 			if isEmpty then
 				CustomOffsets = {}
 				AssetIdsToLoad = {}
+				ExtractedNamesToLoad = {}
 				local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
 				for _, tName in ipairs(tiers) do
 					CustomOffsets[tName] = {}
 					AssetIdsToLoad[tName] = {}
+					ExtractedNamesToLoad[tName] = {}
 				end
 			else
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
-				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds))
+				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
+				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
 			end
 			
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
@@ -697,9 +733,16 @@ local function drawSaveSlotsInterface()
 			saveProfileData()
 			
 			if not isEmpty then
+				-- Restore Asset IDs
 				for tierName, idList in pairs(AssetIdsToLoad) do
 					for _, id in ipairs(idList) do
 						injectAssetId(id, tierName, true)
+					end
+				end
+				-- FIX: Restore Extracted Custom Objects
+				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
+					for _, name in ipairs(extractionList) do
+						generateExtractedPlaceholderModel(tierName, name)
 					end
 				end
 				task.wait(0.2)
@@ -971,8 +1014,15 @@ ExtractBtn.Activated:Connect(function()
 				end
 				cloneCopy.Parent = targetFolder
 				
-				if assetId > 0 and not table.find(AssetIdsToLoad[selectedTierName], assetId) then
-					table.insert(AssetIdsToLoad[selectedTierName], assetId)
+				-- FIX: Safely bind the layout context tracker for non-catalog item persistence structures
+				if assetId > 0 then
+					if not table.find(AssetIdsToLoad[selectedTierName], assetId) then
+						table.insert(AssetIdsToLoad[selectedTierName], assetId)
+					end
+				else
+					if not table.find(ExtractedNamesToLoad[selectedTierName], internalName) then
+						table.insert(ExtractedNamesToLoad[selectedTierName], internalName)
+					end
 				end
 				
 				initializeItemData(selectedTierName, cloneCopy)
@@ -1143,8 +1193,10 @@ updateTierUI = function()
 end
 
 local function batchRehydrateSavedAssets()
-	print("[FEX Restorer]: Parsing structure for saved mesh accessories...")
+	print("[FEX Restorer]: Parsing structure for saved accessories...")
 	local count = 0
+	
+	-- 1. Hydrate Catalog Asset IDs
 	for tierName, idList in pairs(AssetIdsToLoad) do
 		for _, id in ipairs(idList) do
 			count = count + 1
@@ -1157,6 +1209,18 @@ local function batchRehydrateSavedAssets()
 			end)
 		end
 	end
+	
+	-- 2. Hydrate Non-Catalog Extracted Items
+	for tierName, extractionList in pairs(ExtractedNamesToLoad) do
+		for _, name in ipairs(extractionList) do
+			count = count + 1
+			generateExtractedPlaceholderModel(tierName, name)
+		end
+	end
+	
+	task.wait(0.1)
+	updateItemUI()
+	updateEditorUI()
 	print("[FEX Restorer]: Triggered " .. tostring(count) .. " assets for local session generation.")
 end
 
@@ -1179,4 +1243,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util.. ITS FINALLY OVER")
+print("It does end here.")
