@@ -295,7 +295,10 @@ local function localAttach(character, tierName, item)
 	
 	local rootWeld = Instance.new("Weld")
 	rootWeld.Name = "AccessoryWeld"
-	rootWeld.Part0 = handle; rootWeld.Part1 = head
+	
+	-- FIXED: Swapped parts to native alignment (Head -> Part0, Handle -> Part1)
+	rootWeld.Part0 = head
+	rootWeld.Part1 = handle
 	
 	local positionOffset = CFrame.new(rootData.offsetX or 0, rootData.offsetY or 0, rootData.offsetZ or 0)
 	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX or 0), math.rad(rootData.rotateY or 0), math.rad(rootData.rotateZ or 0))
@@ -940,7 +943,7 @@ ExtractBtn.Activated:Connect(function()
 				
 				initializeItemData(selectedTierName, cloneCopy)
 				
-				-- NEW SYSTEM: Calculate local CFrame translation data relative directly to Head
+				-- NATIVE EXTRACT MATH: Capture actual offset space directly from character Head
 				local relativeCFrame = head.CFrame:ToObjectSpace(handle.CFrame)
 				local offsetX, offsetY, offsetZ = relativeCFrame.X, relativeCFrame.Y, relativeCFrame.Z
 				local rX, rY, rZ = relativeCFrame:ToEulerAnglesXYZ()
@@ -1143,4 +1146,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Su119, 131, 191ly.")
+print("Util Loaded WRONG!!!!883ly.")
