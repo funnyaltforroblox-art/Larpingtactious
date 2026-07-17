@@ -230,7 +230,7 @@ local function localAttach(character, tierName, item)
 	handle.Name = "Handle"
 	
 	for _, child in ipairs(clone:GetDescendants()) do
-		if child:IsA("Weld") or child:IsA("ManualWeld") or child:IsA("WeldConstraint") or child:IsA("Attachment") then
+		if child:IsA("Weld") or child:IsA("ManualWeld") or child:IsA("WeldConstraint") or child:IsA("Attachment") or child:IsA("RigidConstraint") then
 			child:Destroy()
 		end
 	end
@@ -885,7 +885,7 @@ ExtractBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ExtractBtn.Text = "EXTRACT ACCESSORIES"
 ExtractBtn.Font = Enum.Font.GothamBold
 ExtractBtn.TextSize = 11
-ExtractBtn.LayoutOrder = 50 -- Ensures it formats sequentially right after the text inputs inside the layout stream
+ExtractBtn.LayoutOrder = 50 
 ExtractBtn.Parent = EditorScroll
 
 local ExtractBtnCorner = Instance.new("UICorner")
@@ -907,57 +907,52 @@ ExtractBtn.Activated:Connect(function()
 	ExtractBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
 	
 	for _, child in ipairs(char:GetChildren()) do
-		-- Filter out objects running locally on client layout active engine arrays
 		if child:IsA("Accessory") and not table.find(activeClientInstances, child) then
-			local handle = child:FindFirstChild("Handle")
+			local handle = child:FindFirstChild("Handle") or child:FindFirstChildWhichIsA("BasePart", true)
 			if handle and handle:IsA("BasePart") then
 				local assetId = 0
-				-- Search for AssetId definitions inside special structural properties
 				local mesh = handle:FindFirstChildWhichIsA("SpecialMesh")
 				if mesh and mesh.MeshId ~= "" then
 					local rawId = string.match(mesh.MeshId, "%d+")
 					if rawId then assetId = tonumber(rawId) end
 				end
 				
-				-- Alternate search fallback path via regular structural configuration IDs
 				if assetId == 0 and child:FindFirstChildWhichIsA("Script") == nil then
 					local rawId = string.match(child.Name, "%d+")
 					if rawId then assetId = tonumber(rawId) end
 				end
 
-				-- Clone structural asset configurations down to current profile databases
 				local internalName = child.Name
 				local cloneCopy = child:Clone()
 				cloneCopy.Name = internalName
+				
+				-- Scrub old joints/attachments from extraction clone copies
+				for _, subItem in ipairs(cloneCopy:GetDescendants()) do
+					if subItem:IsA("Weld") or subItem:IsA("ManualWeld") or subItem:IsA("WeldConstraint") or subItem:IsA("Attachment") or subItem:IsA("RigidConstraint") then
+						subItem:Destroy()
+					end
+				end
 				cloneCopy.Parent = targetFolder
 				
 				if assetId > 0 and not table.find(AssetIdsToLoad[selectedTierName], assetId) then
 					table.insert(AssetIdsToLoad[selectedTierName], assetId)
 				end
 				
-				-- Extract specific matrix values natively bound by welds inside characters
 				initializeItemData(selectedTierName, cloneCopy)
 				
-				local weld = handle:FindFirstChild("AccessoryWeld") or handle:FindFirstChildWhichIsA("Weld")
-				local offsetX, offsetY, offsetZ = 0, 0, 0
-				local rotX, rotY, rotZ = 0, 0, 0
+				-- NEW SYSTEM: Calculate local CFrame translation data relative directly to Head
+				local relativeCFrame = head.CFrame:ToObjectSpace(handle.CFrame)
+				local offsetX, offsetY, offsetZ = relativeCFrame.X, relativeCFrame.Y, relativeCFrame.Z
+				local rX, rY, rZ = relativeCFrame:ToEulerAnglesXYZ()
+				local rotX, rotY, rotZ = math.deg(rX), math.deg(rY), math.deg(rZ)
+				
 				local scaleX, scaleY, scaleZ = 1, 1, 1
-				
-				if weld then
-					local c0 = weld.C0
-					offsetX, offsetY, offsetZ = c0.X, c0.Y, c0.Z
-					local rX, rY, rZ = c0:ToEulerAnglesXYZ()
-					-- FIX applied here: math.deg instead of math.degrees
-					rotX, rotY, rotZ = math.deg(rX), math.deg(rY), math.deg(rZ)
-				end
-				
 				if mesh then
 					scaleX, scaleY, scaleZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
 				else
 					scaleX, scaleY, scaleZ = handle.Size.X, handle.Size.Y, handle.Size.Z
 				end
 				
-				-- Inject the extracted data right into the configuration setup table
 				if CustomOffsets[selectedTierName] and CustomOffsets[selectedTierName][internalName] then
 					CustomOffsets[selectedTierName][internalName]["Handle"] = {
 						offsetX = offsetX, offsetY = offsetY, offsetZ = offsetZ,
@@ -1148,4 +1143,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util LoaOORHAded 8383883ly.")
+print("Util Loaded Su119, 131, 191ly.")
