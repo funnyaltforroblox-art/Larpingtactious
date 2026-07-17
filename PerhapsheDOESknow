@@ -410,7 +410,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = MainFrame
+MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -616,7 +616,6 @@ local function drawSaveSlotsInterface()
 		
 		-- Direct Overwrite Save Execution Handler
 		saveBtn.Activated:Connect(function()
-			-- Instantly overwrite save slot profiles, omitting previous step guards
 			SaveSlots[slotKey] = {
 				Empty = false,
 				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
@@ -625,7 +624,6 @@ local function drawSaveSlotsInterface()
 			saveProfileData()
 			drawSaveSlotsInterface()
 			
-			-- Access physical layout copy for instant execution feedback
 			for _, element in ipairs(SlotFramePanel:GetChildren()) do
 				if element:IsA("Frame") and element:FindFirstChild("SLOT " .. slotKey) then
 					local targetSave = element:FindFirstChild("SAVE") or element:FindFirstChildWhichIsA("TextButton")
@@ -877,6 +875,117 @@ createMatrixInput("Scale X:",  "scaleX",  16)
 createMatrixInput("Scale Y:",  "scaleY",  17)
 createMatrixInput("Scale Z:",  "scaleZ",  18)
 
+-- ====================================================================
+-- EXTRACTION ENGINE DEVELOPMENT FOR SERVER-BOUND AVATAR ACCESSORIES
+-- ====================================================================
+local ExtractBtn = Instance.new("TextButton")
+ExtractBtn.Size = UDim2.new(1, 0, 0, 26)
+ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
+ExtractBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExtractBtn.Text = "EXTRACT ACCESSORIES"
+ExtractBtn.Font = Enum.Font.GothamBold
+ExtractBtn.TextSize = 11
+ExtractBtn.LayoutOrder = 30
+ExtractBtn.Parent = EditorScroll
+
+local ExtractBtnCorner = Instance.new("UICorner")
+ExtractBtnCorner.CornerRadius = UDim.new(0, 4)
+ExtractBtnCorner.Parent = ExtractBtn
+
+ExtractBtn.Activated:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+	
+	local head = char:FindFirstChild("Head")
+	if not head then return end
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if not targetFolder then return end
+
+	local extractedCount = 0
+	ExtractBtn.Text = "EXTRACTING..."
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
+	
+	for _, child in ipairs(char:GetChildren()) do
+		-- Filter out objects running locally on client layout active engine arrays
+		if child:IsA("Accessory") and not table.find(activeClientInstances, child) then
+			local handle = child:FindFirstChild("Handle")
+			if handle and handle:IsA("BasePart") then
+				local assetId = 0
+				-- Search for AssetId definitions inside special structural properties
+				local mesh = handle:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh and mesh.MeshId ~= "" then
+					local rawId = string.match(mesh.MeshId, "%d+")
+					if rawId then assetId = tonumber(rawId) end
+				end
+				
+				-- Alternate search fallback path via regular structural configuration IDs
+				if assetId == 0 and child:FindFirstChildWhichIsA("Script") == nil then
+					local rawId = string.match(child.Name, "%d+")
+					if rawId then assetId = tonumber(rawId) end
+				end
+
+				-- Clone structural asset configurations down to current profile databases
+				local internalName = child.Name
+				local cloneCopy = child:Clone()
+				cloneCopy.Name = internalName
+				cloneCopy.Parent = targetFolder
+				
+				if assetId > 0 and not table.find(AssetIdsToLoad[selectedTierName], assetId) then
+					table.insert(AssetIdsToLoad[selectedTierName], assetId)
+				end
+				
+				-- Extract specific matrix values natively bound by welds inside characters
+				initializeItemData(selectedTierName, cloneCopy)
+				
+				local weld = handle:FindFirstChild("AccessoryWeld") or handle:FindFirstChildWhichIsA("Weld")
+				local offsetX, offsetY, offsetZ = 0, 0, 0
+				local rotX, rotY, rotZ = 0, 0, 0
+				local scaleX, scaleY, scaleZ = 1, 1, 1
+				
+				if weld then
+					local c0 = weld.C0
+					offsetX, offsetY, offsetZ = c0.X, c0.Y, c0.Z
+					local rX, rY, rZ = c0:ToEulerAnglesXYZ()
+					rotX, rotY, rotZ = math.degrees(rX), math.degrees(rY), math.degrees(rZ)
+				end
+				
+				if mesh then
+					scaleX, scaleY, scaleZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
+				else
+					scaleX, scaleY, scaleZ = handle.Size.X, handle.Size.Y, handle.Size.Z
+				end
+				
+				-- Inject the extracted data right into the configuration setup table
+				if CustomOffsets[selectedTierName] and CustomOffsets[selectedTierName][internalName] then
+					CustomOffsets[selectedTierName][internalName]["Handle"] = {
+						offsetX = offsetX, offsetY = offsetY, offsetZ = offsetZ,
+						rotateX = rotX, rotateY = rotY, rotateZ = rotZ,
+						scaleX = scaleX, scaleY = scaleY, scaleZ = scaleZ
+					}
+				end
+				extractedCount = extractedCount + 1
+			end
+		end
+	end
+	
+	saveProfileData()
+	updateItemUI()
+	updateEditorUI()
+	
+	if isPreviewingMode then
+		runUpdatePreviewCycle()
+	elseif LocalPlayer.Character then
+		applyPreset(LocalPlayer.Character, lastPreset)
+	end
+	
+	ExtractBtn.Text = "EXTRACTED (" .. tostring(extractedCount) .. ")"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+	task.wait(1.2)
+	ExtractBtn.Text = "EXTRACT ACCESSORIES"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
+end)
+
 updateEditorUI = function()
 	if selectedItemName == "" then
 		compSelectBtn.Text = "No Item Selected"
@@ -1038,4 +1147,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Succes338jsusuaualy.")
+print("Util LWILL IT CAKE???")
