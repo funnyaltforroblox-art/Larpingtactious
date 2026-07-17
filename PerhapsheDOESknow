@@ -1,83 +1,1237 @@
--- FEX Customizer - Clean Extraction Build
+-- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, Clearable Save Slots, and Custom Slot Renaming)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+
 local LocalPlayer = Players.LocalPlayer
+repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
 
-local FILE_NAME = "FEX_Customizer_Clean.json"
-local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets") or Instance.new("Folder", ReplicatedStorage)
-TargetPresetFolder.Name = "FaceAccPresets"
+local FILE_NAME = "FEX_Customizer_Presets.json"
 
-local CustomOffsets, ExtractedNamesToLoad, ExtractedVisuals, SaveSlots = {}, {}, {}, {}
+-- ====================================================================
+-- CONFIGURATION & CENTRAL STORAGE LAYOUT
+-- ====================================================================
+local Config = {
+	SelectedDefault  = "face acc",      
+	SelectedMinor    = "MinorDamage",   
+	SelectedMedium   = "MediumDamage",  
+	SelectedMajor    = "MajorDamage",   
+	SelectedCritical = "CriticalDamage" 
+}
 
--- Helper: Deep Copy to prevent memory reference leakage
-local function deepCopyTable(original)
-    local copy = {}
-    for k, v in pairs(original) do
-        if type(v) == "table" then copy[k] = deepCopyTable(v) else copy[k] = v end
-    end
-    return copy
-end
+local CustomOffsets = {}
+local AssetIdsToLoad = {} 
+local ExtractedNamesToLoad = {} -- Explicit tracking for extracted item names to enforce persistence
+local ExtractedVisuals = {}     -- Stores MeshId, TextureId, and structural properties for full rehydration
+local SaveSlots = {} -- Matrix for slots 1-5
+local SlotNames = {} -- Custom mapping for user-renamed slots
+local lastPreset = ""
+local activeClientInstances = {}
+local isPreviewingMode = false 
 
+local selectedTierName = Config.SelectedDefault
+local selectedItemName = ""
+local selectedSubPartName = "Handle"
+local currentHighlightBox = nil
+
+local injectAssetId
+
+-- ====================================================================
+-- LOCAL FILE SYSTEM SAVE / LOAD PIPELINE
+-- ====================================================================
 local function saveProfileData()
-    if writefile then
-        local package = {Offsets = CustomOffsets, ExtractedNames = ExtractedNamesToLoad, ExtractedVisuals = ExtractedVisuals, Slots = SaveSlots}
-        writefile(FILE_NAME, HttpService:JSONEncode(package))
-    end
+	local success, err = pcall(function()
+		if writefile then
+			local package = {
+				Offsets = CustomOffsets,
+				AssetIds = AssetIdsToLoad,
+				ExtractedNames = ExtractedNamesToLoad,
+				ExtractedVisuals = ExtractedVisuals,
+				Slots = SaveSlots,
+				SlotNames = SlotNames
+			}
+			local jsonString = HttpService:JSONEncode(package)
+			writefile(FILE_NAME, jsonString)
+			print("[FEX Save Engine]: Successfully wrote file to workspace/" .. FILE_NAME)
+		else
+			warn("[FEX Save Warning]: Your executor does not support 'writefile'!")
+		end
+	end)
+	
+	if not success then
+		warn("[FEX Save Error]: Executor failed to save file! Reason: " .. tostring(err))
+	end
 end
 
--- Extraction Logic: Uses tick() to ensure unique keys for every accessory
-local function extractAccessory(accessory, tierName)
-    local handle = accessory:FindFirstChild("Handle") or accessory:FindFirstChildWhichIsA("BasePart", true)
-    if not handle then return end
-    
-    -- Unique Key: Ensures even if you extract the same item twice, it isn't mirrored
-    local uniqueID = accessory.Name .. "_" .. tostring(tick())
-    
-    if not ExtractedVisuals[tierName] then ExtractedVisuals[tierName] = {} end
-    ExtractedVisuals[tierName][uniqueID] = {}
-    
-    -- Extract Visual Data
-    for _, part in ipairs(accessory:GetDescendants()) do
-        if part:IsA("BasePart") then
-            local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
-            ExtractedVisuals[tierName][uniqueID][part.Name] = {
-                MeshId = pMesh and pMesh.MeshId or "",
-                TextureId = pMesh and pMesh.TextureId or "",
-                Size = part.Size,
-                Transparency = part.Transparency,
-                Color = {part.Color.R, part.Color.G, part.Color.B}
-            }
-        end
-    end
-    
-    table.insert(ExtractedNamesToLoad[tierName], uniqueID)
-    return uniqueID
+local function loadProfileData()
+	local success, result = pcall(function()
+		if readfile and isfile and isfile(FILE_NAME) then
+			return readfile(FILE_NAME)
+		end
+		return nil
+	end)
+	
+	if success and result and type(result) == "string" then
+		local successParse, parsedData = pcall(function()
+			return HttpService:JSONDecode(result)
+		end)
+		if successParse and type(parsedData) == "table" then
+			CustomOffsets = parsedData.Offsets or {}
+			AssetIdsToLoad = parsedData.AssetIds or {}
+			ExtractedNamesToLoad = parsedData.ExtractedNames or {}
+			ExtractedVisuals = parsedData.ExtractedVisuals or {}
+			SaveSlots = parsedData.Slots or {}
+			SlotNames = parsedData.SlotNames or {}
+			print("[FEX Local Engine]: Successfully loaded presets and slots from workspace/" .. FILE_NAME)
+			return
+		end
+	end
+	print("[FEX Local Engine]: No local file found or fresh setup. Creating clean profile matrix.")
 end
 
--- UI Setup (Simplified for Reliability)
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 400, 0, 200)
-MainFrame.Position = UDim2.new(0.5, -200, 0.5, -100)
-MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-MainFrame.Visible = true
+loadProfileData()
 
-local ExtractBtn = Instance.new("TextButton", MainFrame)
-ExtractBtn.Size = UDim2.new(0, 200, 0, 50)
-ExtractBtn.Position = UDim2.new(0.5, -100, 0.5, -25)
-ExtractBtn.Text = "EXTRACT ALL ACCESSORIES"
+-- Ensure slots and names structure is initialized safely
+for i = 1, 5 do
+	local slotKey = tostring(i)
+	if not SaveSlots[slotKey] then
+		SaveSlots[slotKey] = { Empty = true }
+	end
+	if not SlotNames[slotKey] then
+		SlotNames[slotKey] = "SLOT " .. slotKey
+	end
+end
+
+-- ====================================================================
+-- DIRECTORY SETUP LAYER
+-- ====================================================================
+local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
+if not TargetPresetFolder then
+	local success, result = pcall(function()
+		local folder = Instance.new("Folder")
+		folder.Name = "FaceAccPresets"
+		folder.Parent = ReplicatedStorage
+		return folder
+	end)
+	if success then TargetPresetFolder = result else
+		TargetPresetFolder = Instance.new("Folder")
+		TargetPresetFolder.Name = "FaceAccPresets"
+		TargetPresetFolder.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
+end
+
+local function ensureSubFolder(name)
+	if not TargetPresetFolder:FindFirstChild(name) then
+		local subFolder = Instance.new("Folder")
+		subFolder.Name = name
+		subFolder.Parent = TargetPresetFolder
+	end
+	if not CustomOffsets[name] then CustomOffsets[name] = {} end
+	if not AssetIdsToLoad[name] then AssetIdsToLoad[name] = {} end
+	if not ExtractedNamesToLoad[name] then ExtractedNamesToLoad[name] = {} end
+	if not ExtractedVisuals[name] then ExtractedVisuals[name] = {} end
+end
+
+ensureSubFolder(Config.SelectedDefault)
+ensureSubFolder(Config.SelectedMinor)
+ensureSubFolder(Config.SelectedMedium)
+ensureSubFolder(Config.SelectedMajor)
+ensureSubFolder(Config.SelectedCritical)
+
+local function initializeItemData(tierName, item)
+	if not CustomOffsets[tierName] then CustomOffsets[tierName] = {} end
+	if CustomOffsets[tierName][item.Name] then return end
+	
+	local itemProfile = {}
+	local handle = item:FindFirstChild("Handle") or item:FindFirstChildWhichIsA("BasePart", true)
+	if not handle and item:IsA("Model") and item.PrimaryPart then handle = item.PrimaryPart end
+	
+	if handle then
+		handle.Name = "Handle"
+		itemProfile["Handle"] = {
+			offsetX = 0, offsetY = 0, offsetZ = 0, 
+			rotateX = 0, rotateY = 0, rotateZ = 0, 
+			scaleX = 1, scaleY = 1, scaleZ = 1
+		}
+		
+		local partCounter = 1
+		for _, child in ipairs(item:GetDescendants()) do
+			if child:IsA("BasePart") and child ~= handle then
+				if child.Name == "Part" or child.Name == "MeshPart" or child.Name == "" then
+					child.Name = "Component_" .. tostring(partCounter)
+					partCounter = partCounter + 1
+				end
+				
+				local defaultX, defaultY, defaultZ = 1, 1, 1
+				local mesh = child:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh then
+					defaultX, defaultY, defaultZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
+				else
+					defaultX, defaultY, defaultZ = child.Size.X, child.Size.Y, child.Size.Z
+				end
+				
+				itemProfile[child.Name] = {
+					offsetX = 0, offsetY = 0, offsetZ = 0,
+					rotateX = 0, rotateY = 0, rotateZ = 0,
+					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ
+				}
+			end
+		end
+	end
+	CustomOffsets[tierName][item.Name] = itemProfile
+	saveProfileData()
+end
+
+-- ====================================================================
+-- HIGHLIGHT SELECTION LAYER
+-- ====================================================================
+local function clearActiveHighlight()
+	if currentHighlightBox then
+		currentHighlightBox:Destroy()
+		currentHighlightBox = nil
+	end
+end
+
+local function highlightSelectedSubPart()
+	clearActiveHighlight()
+	local character = LocalPlayer.Character
+	if not character or selectedItemName == "" then return end
+	
+	for _, inst in ipairs(activeClientInstances) do
+		if inst and inst.Parent and inst.Name == selectedItemName then
+			local targetPartInstance = (inst:IsA("BasePart") and inst.Name == selectedSubPartName) and inst or inst:FindFirstChild(selectedSubPartName, true)
+			if not targetPartInstance then
+				for _, d in ipairs(inst:GetDescendants()) do
+					if d:IsA("BasePart") and d.Name == selectedSubPartName then
+						targetPartInstance = d
+						break
+					end
+				end
+			end
+			
+			if targetPartInstance and targetPartInstance:IsA("BasePart") then
+				local selectionBox = Instance.new("SelectionBox")
+				selectionBox.Name = "Customizer_PartHighlight"
+				selectionBox.Color3 = Color3.fromRGB(0, 255, 255)
+				selectionBox.LineThickness = 0.04
+				selectionBox.Adornee = targetPartInstance
+				selectionBox.Parent = targetPartInstance
+				currentHighlightBox = selectionBox
+				break
+			end
+		end
+	end
+end
+
+-- ====================================================================
+-- COUPLING MECHANICAL RE-WELD PIPELINE (LOCAL AXIS ALIGNED)
+-- ====================================================================
+local function localAttach(character, tierName, item)
+	local head = character:WaitForChild("Head", 5)
+	if not head then return end
+	
+	if not (CustomOffsets[tierName] and CustomOffsets[tierName][item.Name]) then
+		initializeItemData(tierName, item)
+	end
+	local itemData = CustomOffsets[tierName][item.Name]
+	if not itemData then return end
+	
+	local clone = item:Clone()
+	local handle = clone.Name == "Handle" and clone or clone:FindFirstChild("Handle") or clone:FindFirstChildWhichIsA("BasePart", true)
+	if not handle and clone:IsA("Model") and clone.PrimaryPart then handle = clone.PrimaryPart end
+	if not handle then return end
+	
+	handle.Name = "Handle"
+	
+	for _, child in ipairs(clone:GetDescendants()) do
+		if child:IsA("Weld") or child:IsA("ManualWeld") or child:IsA("WeldConstraint") or child:IsA("Attachment") or child:IsA("RigidConstraint") then
+			child:Destroy()
+		end
+	end
+	
+	local structuralOffsets = {}
+	local partCounter = 1
+	
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") and obj ~= handle then
+			if obj.Name == "Part" or obj.Name == "MeshPart" or obj.Name == "" then
+				obj.Name = "Component_" .. tostring(partCounter)
+				partCounter = partCounter + 1
+			end
+			
+			structuralOffsets[obj.Name] = handle.CFrame:ToObjectSpace(obj.CFrame)
+			obj.Anchored = false; obj.CanCollide = false; obj.Massless = true
+			
+			local pData = itemData[obj.Name]
+			if pData then
+				local mesh = obj:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh then
+					mesh.Scale = Vector3.new(pData.scaleX or 1, pData.scaleY or 1, pData.scaleZ or 1)
+				else
+					obj.Size = Vector3.new(pData.scaleX or 1, pData.scaleY or 1, pData.scaleZ or 1)
+				end
+			end
+		end
+	end
+	
+	handle.Anchored = false; handle.CanCollide = false; handle.Massless = true
+	local rootData = itemData["Handle"] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0,scaleX=1,scaleY=1,scaleZ=1}
+	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
+	if rootMesh then
+		rootMesh.Scale = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
+	else
+		handle.Size = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
+	end
+
+	for _, obj in ipairs(clone:GetDescendants()) do
+		if obj:IsA("BasePart") and obj ~= handle then
+			local pData = itemData[obj.Name] or {offsetX=0,offsetY=0,offsetZ=0,rotateX=0,rotateY=0,rotateZ=0}
+			local innerWeld = Instance.new("Weld")
+			innerWeld.Name = "ModelInnerWeld"
+			innerWeld.Part0 = obj; innerWeld.Part1 = handle
+			
+			local originalLocalCFrame = structuralOffsets[obj.Name] or CFrame.new()
+			local customPosOffset = CFrame.new(pData.offsetX or 0, pData.offsetY or 0, pData.offsetZ or 0)
+			local customRotOffset = CFrame.Angles(math.rad(pData.rotateX or 0), math.rad(pData.rotateY or 0), math.rad(pData.rotateZ or 0))
+			
+			innerWeld.C0 = originalLocalCFrame:Inverse() * customPosOffset * customRotOffset
+			innerWeld.Parent = obj
+		end
+	end
+
+	local accessory = clone:IsA("Accessory") and clone or Instance.new("Accessory")
+	if not clone:IsA("Accessory") then
+		accessory.Name = item.Name
+		clone.Parent = accessory
+	else
+		accessory.Name = item.Name
+	end
+	
+	local rootWeld = Instance.new("Weld")
+	rootWeld.Name = "AccessoryWeld"
+	rootWeld.Part0 = head
+	rootWeld.Part1 = handle
+	
+	local positionOffset = CFrame.new(rootData.offsetX or 0, rootData.offsetY or 0, rootData.offsetZ or 0)
+	local rotationOffset = CFrame.Angles(math.rad(rootData.rotateX or 0), math.rad(rootData.rotateY or 0), math.rad(rootData.rotateZ or 0))
+	
+	rootWeld.C0 = positionOffset * rotationOffset
+	rootWeld.Parent = handle
+	
+	accessory.Parent = character
+	table.insert(activeClientInstances, accessory)
+end
+
+local function clearActiveItems()
+	clearActiveHighlight()
+	for _, item in ipairs(activeClientInstances) do
+		if item and item.Parent then item:Destroy() end
+	end
+	activeClientInstances = {}
+end
+
+local function applyPreset(character, folderName)
+	clearActiveItems()
+	if folderName == "" or folderName == "None" then return end
+	
+	local folder = TargetPresetFolder:FindFirstChild(folderName)
+	if not folder then return end
+	
+	for _, item in ipairs(folder:GetChildren()) do
+		task.spawn(localAttach, character, folderName, item)
+	end
+	task.defer(highlightSelectedSubPart)
+end
+
+local function forceRecalculateHealthPreset(character)
+	if isPreviewingMode then return end 
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then return end
+	
+	local ratio = humanoid.Health / humanoid.MaxHealth
+	local target = Config.SelectedDefault
+	
+	if ratio <= 0.15 then target = Config.SelectedCritical
+	elseif ratio <= 0.30 then target = Config.SelectedMajor
+	elseif ratio <= 0.50 then target = Config.SelectedMedium
+	elseif ratio <= 0.75 then target = Config.SelectedMinor end
+	
+	if target ~= lastPreset then
+		lastPreset = target
+		applyPreset(character, target)
+	end
+end
+
+local function monitorHealth(character)
+	local humanoid = character:WaitForChild("Humanoid")
+	humanoid.HealthChanged:Connect(function()
+		forceRecalculateHealthPreset(character)
+	end)
+	forceRecalculateHealthPreset(character)
+end
+
+-- UPGRADED REHYDRATION SYSTEM: Now fully builds meshes from captured data matrices
+local function generateExtractedPlaceholderModel(tierName, itemName)
+	local folder = TargetPresetFolder:FindFirstChild(tierName)
+	if not folder or folder:FindFirstChild(itemName) then return end
+	
+	local visualProfile = ExtractedVisuals[tierName] and ExtractedVisuals[tierName][itemName]
+	if not visualProfile then return end
+	
+	local fakeAccessory = Instance.new("Accessory")
+	fakeAccessory.Name = itemName
+	
+	for partName, visualData in pairs(visualProfile) do
+		local part = Instance.new("MeshPart")
+		part.Name = partName
+		part.Size = Vector3.new(visualData.SizeX or 1, visualData.SizeY or 1, visualData.SizeZ or 1)
+		
+		local sm = Instance.new("SpecialMesh")
+		sm.MeshId = visualData.MeshId or ""
+		sm.TextureId = visualData.TextureId or ""
+		sm.Scale = Vector3.new(1, 1, 1)
+		sm.Parent = part
+		
+		part.Parent = fakeAccessory
+	end
+	
+	fakeAccessory.Parent = folder
+end
+
+-- ====================================================================
+-- MOBILE DRAG AND CONTROL GUI ENGINE
+-- ====================================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FaceAccMobileUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local uiParented = false
+pcall(function()
+	if game:GetService("CoreGui") then
+		ScreenGui.Parent = game:GetService("CoreGui")
+		uiParented = true
+	end
+end)
+if not uiParented then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local function makeMobileDraggable(guiObject)
+	local dragging = false
+	local dragInput, dragStart, startPos
+
+	guiObject.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = guiObject.Position
+			
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+
+	guiObject.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 610, 0, 320)
+MainFrame.Position = UDim2.new(0.5, -305, 0.4, -160)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Parent = ScreenGui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = MainFrame
+
+makeMobileDraggable(MainFrame)
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "FEXToggle"
+ToggleButton.Size = UDim2.new(0, 60, 0, 60)
+ToggleButton.Position = UDim2.new(0.1, 0, 0.3, 0)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+ToggleButton.BorderSizePixel = 0
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.Text = "FEX"
+ToggleButton.TextColor3 = Color3.fromRGB(0, 255, 150)
+ToggleButton.TextSize = 16
+ToggleButton.Active = true
+ToggleButton.Parent = ScreenGui
+
+local CircleCorner = Instance.new("UICorner")
+CircleCorner.CornerRadius = UDim.new(1, 0)
+CircleCorner.Parent = ToggleButton
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 255, 150)
+UIStroke.Thickness = 2
+UIStroke.Parent = ToggleButton
+
+makeMobileDraggable(ToggleButton)
+
+ToggleButton.Activated:Connect(function()
+	MainFrame.Visible = not MainFrame.Visible
+	if MainFrame.Visible then highlightSelectedSubPart() else clearActiveHighlight() end
+end)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -250, 0, 35)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.Text = "MODEL CONFIGURATION & AUTOMATIC PERSISTENCE PANEL"
+TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
+TitleLabel.TextSize = 11
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+TitleLabel.Parent = MainFrame
+
+local PreviewToggleBtn = Instance.new("TextButton")
+PreviewToggleBtn.Size = UDim2.new(0, 100, 0, 24)
+PreviewToggleBtn.Position = UDim2.new(1, -115, 0, 6)
+PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 35)
+PreviewToggleBtn.Font = Enum.Font.GothamBold
+PreviewToggleBtn.Text = "PREVIEW: OFF"
+PreviewToggleBtn.TextColor3 = Color3.fromRGB(240, 90, 90)
+PreviewToggleBtn.TextSize = 10
+PreviewToggleBtn.Parent = MainFrame
+
+local PrevCorner = Instance.new("UICorner")
+PrevCorner.CornerRadius = UDim.new(0, 4)
+PrevCorner.Parent = PreviewToggleBtn
+
+local function runUpdatePreviewCycle()
+	if not LocalPlayer.Character then return end
+	if isPreviewingMode then
+		PreviewToggleBtn.Text = "PREVIEW: ON"
+		PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 110, 60)
+		PreviewToggleBtn.TextColor3 = Color3.fromRGB(90, 255, 150)
+		lastPreset = "PREVIEW_OVERRIDE_LOCK"
+		applyPreset(LocalPlayer.Character, selectedTierName)
+	else
+		PreviewToggleBtn.Text = "PREVIEW: OFF"
+		PreviewToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 35, 35)
+		PreviewToggleBtn.TextColor3 = Color3.fromRGB(240, 90, 90)
+		lastPreset = ""
+		forceRecalculateHealthPreset(LocalPlayer.Character)
+	end
+end
+
+PreviewToggleBtn.Activated:Connect(function()
+	isPreviewingMode = not isPreviewingMode
+	runUpdatePreviewCycle()
+end)
+
+-- Scrolling Lists Layout
+local TierSelectionPanel = Instance.new("ScrollingFrame")
+TierSelectionPanel.Size = UDim2.new(0, 120, 1, -100)
+TierSelectionPanel.Position = UDim2.new(0, 10, 0, 40)
+TierSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+TierSelectionPanel.BorderSizePixel = 0
+TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+TierSelectionPanel.ScrollBarThickness = 3
+TierSelectionPanel.Parent = MainFrame
+
+local ItemSelectionPanel = Instance.new("ScrollingFrame")
+ItemSelectionPanel.Size = UDim2.new(0, 120, 1, -100)
+ItemSelectionPanel.Position = UDim2.new(0, 135, 0, 40)
+ItemSelectionPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+ItemSelectionPanel.BorderSizePixel = 0
+ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+ItemSelectionPanel.ScrollBarThickness = 3
+ItemSelectionPanel.Parent = MainFrame
+
+local EditorScroll = Instance.new("ScrollingFrame")
+EditorScroll.Size = UDim2.new(0, 165, 1, -100)
+EditorScroll.Position = UDim2.new(0, 265, 0, 40)
+EditorScroll.BackgroundTransparency = 1
+EditorScroll.BorderSizePixel = 0
+EditorScroll.ScrollBarThickness = 3
+EditorScroll.Parent = MainFrame
+
+local EditorListLayout = Instance.new("UIListLayout")
+EditorListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+EditorListLayout.Padding = UDim.new(0, 5)
+EditorListLayout.Parent = EditorScroll
+
+EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 25)
+end)
+
+-- ====================================================================
+-- SAVE SLOTS ENGINE PANEL
+-- ====================================================================
+local SlotFramePanel = Instance.new("ScrollingFrame")
+SlotFramePanel.Name = "SlotFramePanel"
+SlotFramePanel.Size = UDim2.new(0, 160, 0, 215)
+SlotFramePanel.Position = UDim2.new(0, 440, 0, 40)
+SlotFramePanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+SlotFramePanel.BorderSizePixel = 0
+SlotFramePanel.CanvasSize = UDim2.new(0, 0, 0, 260)
+SlotFramePanel.ScrollBarThickness = 2
+SlotFramePanel.Parent = MainFrame
+
+local SlotPanelCorner = Instance.new("UICorner")
+SlotPanelCorner.CornerRadius = UDim.new(0, 6)
+SlotPanelCorner.Parent = SlotFramePanel
+
+local SlotListLayout = Instance.new("UIListLayout")
+SlotListLayout.Padding = UDim.new(0, 6)
+SlotListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+SlotListLayout.Parent = SlotFramePanel
+
+local updateTierUI, updateItemUI, updateEditorUI
+
+local function drawSaveSlotsInterface()
+	for _, child in ipairs(SlotFramePanel:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	
+	for i = 1, 5 do
+		local slotKey = tostring(i)
+		local slotData = SaveSlots[slotKey]
+		local isEmpty = slotData.Empty == true
+		local slotDisplayName = SlotNames[slotKey] or ("SLOT " .. slotKey)
+		
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(0, 144, 0, 44)
+		card.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+		card.BorderSizePixel = 0
+		card.Parent = SlotFramePanel
+		
+		local cardCorner = Instance.new("UICorner")
+		cardCorner.CornerRadius = UDim.new(0, 4)
+		cardCorner.Parent = card
+		
+		local statusLabel = Instance.new("TextLabel")
+		statusLabel.Size = UDim2.new(1, -30, 0, 16)
+		statusLabel.Position = UDim2.new(0, 6, 0, 2)
+		statusLabel.BackgroundTransparency = 1
+		statusLabel.Font = Enum.Font.GothamBold
+		statusLabel.Text = slotDisplayName .. (isEmpty and " [EMPTY]" or "")
+		statusLabel.TextColor3 = isEmpty and Color3.fromRGB(130, 130, 140) or Color3.fromRGB(0, 255, 150)
+		statusLabel.TextSize = 9
+		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+		statusLabel.Parent = card
+		
+		local renameBtn = Instance.new("TextBox")
+		renameBtn.Size = UDim2.new(0, 22, 0, 14)
+		renameBtn.Position = UDim2.new(1, -26, 0, 3)
+		renameBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+		renameBtn.Font = Enum.Font.GothamBold
+		renameBtn.Text = "✏️"
+		renameBtn.TextColor3 = Color3.fromRGB(200, 200, 205)
+		renameBtn.TextSize = 8
+		renameBtn.ClearTextOnFocus = true
+		renameBtn.Parent = card
+		
+		local rnCorner = Instance.new("UICorner")
+		rnCorner.CornerRadius = UDim.new(0, 3)
+		rnCorner.Parent = renameBtn
+		
+		renameBtn.FocusLost:Connect(function(enterPressed)
+			local filteredText = string.gsub(renameBtn.Text, "^%s*(.-)%s*$", "%1")
+			if filteredText ~= "" and filteredText ~= "✏️" and filteredText ~= "Invalid!" then
+				SlotNames[slotKey] = string.sub(filteredText, 1, 16)
+			else
+				SlotNames[slotKey] = "SLOT " .. slotKey
+			end
+			saveProfileData()
+			drawSaveSlotsInterface()
+		end)
+		
+		local loadBtn = Instance.new("TextButton")
+		loadBtn.Size = UDim2.new(0, 62, 0, 18)
+		loadBtn.Position = UDim2.new(0, 6, 0, 20)
+		loadBtn.BackgroundColor3 = isEmpty and Color3.fromRGB(45, 45, 50) or Color3.fromRGB(0, 100, 180)
+		loadBtn.Font = Enum.Font.GothamBold
+		loadBtn.Text = "LOAD"
+		loadBtn.TextColor3 = isEmpty and Color3.fromRGB(160, 160, 160) or Color3.fromRGB(255, 255, 255)
+		loadBtn.TextSize = 9
+		loadBtn.AutoButtonColor = true
+		loadBtn.Parent = card
+		
+		local lCc = Instance.new("UICorner")
+		lCc.CornerRadius = UDim.new(0, 3)
+		lCc.Parent = loadBtn
+		
+		local saveBtn = Instance.new("TextButton")
+		saveBtn.Size = UDim2.new(0, 62, 0, 18)
+		saveBtn.Position = UDim2.new(0, 76, 0, 20)
+		saveBtn.BackgroundColor3 = Color3.fromRGB(150, 90, 0)
+		saveBtn.Font = Enum.Font.GothamBold
+		saveBtn.Text = "SAVE"
+		saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		saveBtn.TextSize = 9
+		saveBtn.Parent = card
+		
+		local sCc = Instance.new("UICorner")
+		sCc.CornerRadius = UDim.new(0, 3)
+		sCc.Parent = saveBtn
+		
+		saveBtn.Activated:Connect(function()
+			SaveSlots[slotKey] = {
+				Empty = false,
+				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
+				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad)),
+				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad)),
+				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedVisuals))
+			}
+			saveProfileData()
+			drawSaveSlotsInterface()
+		end)
+		
+		loadBtn.Activated:Connect(function()
+			if isEmpty then
+				CustomOffsets = {}
+				AssetIdsToLoad = {}
+				ExtractedNamesToLoad = {}
+				ExtractedVisuals = {}
+				local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
+				for _, tName in ipairs(tiers) do
+					CustomOffsets[tName] = {}
+					AssetIdsToLoad[tName] = {}
+					ExtractedNamesToLoad[tName] = {}
+					ExtractedVisuals[tName] = {}
+				end
+			else
+				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
+				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
+				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
+				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
+			end
+			
+			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
+				folder:ClearAllChildren()
+			end
+			
+			saveProfileData()
+			
+			if not isEmpty then
+				for tierName, idList in pairs(AssetIdsToLoad) do
+					for _, id in ipairs(idList) do
+						injectAssetId(id, tierName, true)
+					end
+				end
+				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
+					for _, name in ipairs(extractionList) do
+						generateExtractedPlaceholderModel(tierName, name)
+					end
+				end
+				task.wait(0.2)
+			else
+				selectedItemName = ""
+				selectedSubPartName = "Handle"
+			end
+			
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			elseif LocalPlayer.Character then
+				lastPreset = ""
+				forceRecalculateHealthPreset(LocalPlayer.Character)
+			end
+			
+			updateTierUI()
+			updateItemUI()
+			updateEditorUI()
+			
+			loadBtn.Text = "LOADED!"
+			task.wait(0.8)
+			loadBtn.Text = "LOAD"
+		end)
+	end
+end
+
+local InjectorFrame = Instance.new("Frame")
+InjectorFrame.Size = UDim2.new(1, -20, 0, 45)
+InjectorFrame.Position = UDim2.new(0, 10, 1, -55)
+InjectorFrame.BackgroundColor3 = Color3.fromRGB(32, 32, 40)
+InjectorFrame.BorderSizePixel = 0
+InjectorFrame.Parent = MainFrame
+
+local InjectorCorner = Instance.new("UICorner")
+InjectorCorner.CornerRadius = UDim.new(0, 6)
+InjectorCorner.Parent = InjectorFrame
+
+local IdTextBox = Instance.new("TextBox")
+IdTextBox.Size = UDim2.new(0, 380, 0, 30)
+IdTextBox.Position = UDim2.new(0, 10, 0, 7)
+IdTextBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+IdTextBox.BorderSizePixel = 0
+IdTextBox.Font = Enum.Font.Gotham
+IdTextBox.PlaceholderText = "Enter Asset ID..."
+IdTextBox.Text = ""
+IdTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+IdTextBox.TextSize = 11
+IdTextBox.ClearTextOnFocus = true
+IdTextBox.Parent = InjectorFrame
+
+local IdCorner = Instance.new("UICorner")
+IdCorner.CornerRadius = UDim.new(0, 4)
+IdCorner.Parent = IdTextBox
+
+local InjectBtn = Instance.new("TextButton")
+InjectBtn.Size = UDim2.new(1, -405, 0, 30)
+InjectBtn.Position = UDim2.new(0, 400, 0, 7)
+InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+InjectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+InjectBtn.Text = "DOWNLOAD ID"
+InjectBtn.Font = Enum.Font.GothamBold
+InjectBtn.TextSize = 10
+InjectBtn.Parent = InjectorFrame
+
+local InjectBtnCorner = Instance.new("UICorner")
+InjectBtnCorner.CornerRadius = UDim.new(0, 4)
+InjectBtnCorner.Parent = InjectBtn
+
+injectAssetId = function(id, tierName, isSilentRestore)
+	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
+	if not targetFolder then return false end
+	
+	local success, assetModel = pcall(function()
+		return game:GetObjects("rbxassetid://" .. id)[1]
+	end)
+	
+	if success and assetModel then
+		assetModel.Name = "Asset_" .. tostring(id)
+		assetModel.Parent = targetFolder
+		
+		if not table.find(AssetIdsToLoad[tierName], id) then
+			table.insert(AssetIdsToLoad[tierName], id)
+		end
+		
+		initializeItemData(tierName, assetModel)
+		
+		if not isSilentRestore then
+			selectedItemName = assetModel.Name
+			selectedSubPartName = "Handle"
+			
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			elseif LocalPlayer.Character then
+				applyPreset(LocalPlayer.Character, lastPreset)
+			end
+			
+			updateItemUI()
+			updateEditorUI()
+			saveProfileData()
+		end
+		return true
+	end
+	return false
+end
+
+InjectBtn.Activated:Connect(function()
+	local id = tonumber(IdTextBox.Text)
+	if not id then IdTextBox.Text = "Invalid ID!"; task.wait(1); IdTextBox.Text = ""; return end
+	
+	InjectBtn.Text = "DOWNLOADING..."
+	InjectBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
+	
+	task.spawn(function()
+		local ok = injectAssetId(id, selectedTierName, false)
+		IdTextBox.Text = ok and "Success!" or "Load Fail!"
+		task.wait(1.2)
+		InjectBtn.Text = "DOWNLOAD ID"
+		InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+		IdTextBox.Text = ""
+	end)
+end)
+
+local compSelectBtn = Instance.new("TextButton")
+compSelectBtn.Size = UDim2.new(1, 0, 0, 26)
+compSelectBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 45)
+compSelectBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+compSelectBtn.Text = "Part: Handle"
+compSelectBtn.Font = Enum.Font.GothamBold
+compSelectBtn.TextSize = 11
+compSelectBtn.LayoutOrder = 1
+compSelectBtn.Parent = EditorScroll
+
+local dropDownWrapper = Instance.new("Frame")
+dropDownWrapper.Size = UDim2.new(1, 0, 0, 100)
+dropDownWrapper.BackgroundTransparency = 1
+dropDownWrapper.Visible = false
+dropDownWrapper.LayoutOrder = 2
+dropDownWrapper.Parent = EditorScroll
+
+local compDropdownScroll = Instance.new("ScrollingFrame")
+compDropdownScroll.Size = UDim2.new(1, 0, 1, 0)
+compDropdownScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+compDropdownScroll.BorderSizePixel = 0
+compDropdownScroll.ScrollBarThickness = 3
+compDropdownScroll.Parent = dropDownWrapper
+
+compSelectBtn.Activated:Connect(function()
+	dropDownWrapper.Visible = not dropDownWrapper.Visible
+end)
+
+local inputs = {}
+local function createMatrixInput(labelText, property, orderingIndex)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(1, 0, 0, 24)
+	container.BackgroundTransparency = 1
+	container.LayoutOrder = orderingIndex
+	container.Parent = EditorScroll
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0, 70, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamSemibold
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(170, 170, 180)
+	label.TextSize = 11
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = container
+
+	local textBox = Instance.new("TextBox")
+	textBox.Size = UDim2.new(1, -75, 1, 0)
+	textBox.Position = UDim2.new(0, 75, 0, 0)
+	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	textBox.BorderSizePixel = 0
+	textBox.Font = Enum.Font.Gotham
+	textBox.Text = "0"
+	textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	textBox.TextSize = 11
+	textBox.ClearTextOnFocus = false
+	
+	local boxCorner = Instance.new("UICorner")
+	boxCorner.CornerRadius = UDim.new(0, 4)
+	boxCorner.Parent = textBox
+	textBox.Parent = container
+
+	textBox.FocusLost:Connect(function()
+		if selectedItemName == "" then return end
+		local tierData = CustomOffsets[selectedTierName]
+		if tierData and tierData[selectedItemName] and tierData[selectedItemName][selectedSubPartName] then
+			local val = tonumber(textBox.Text)
+			if val then
+				tierData[selectedItemName][selectedSubPartName][property] = val
+				if isPreviewingMode then
+					runUpdatePreviewCycle()
+				elseif LocalPlayer.Character then
+					applyPreset(LocalPlayer.Character, lastPreset)
+				end
+				saveProfileData()
+			end
+		end
+	end)
+	inputs[property] = textBox
+end
+
+createMatrixInput("Offset X:", "offsetX", 10)
+createMatrixInput("Offset Y:", "offsetY", 11)
+createMatrixInput("Offset Z:", "offsetZ", 12)
+createMatrixInput("Rotate X:", "rotateX", 13)
+createMatrixInput("Rotate Y:", "rotateY", 14)
+createMatrixInput("Rotate Z:", "rotateZ", 15)
+createMatrixInput("Scale X:",  "scaleX",  16)
+createMatrixInput("Scale Y:",  "scaleY",  17)
+createMatrixInput("Scale Z:",  "scaleZ",  18)
+
+-- ====================================================================
+-- ADVANCED EXTRACTION ENGINE: Slices and records structural visual properties
+-- ====================================================================
+local ExtractBtn = Instance.new("TextButton")
+ExtractBtn.Size = UDim2.new(1, 0, 0, 30)
+ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
+ExtractBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ExtractBtn.Text = "EXTRACT ACCESSORIES"
+ExtractBtn.Font = Enum.Font.GothamBold
+ExtractBtn.TextSize = 11
+ExtractBtn.LayoutOrder = 50 
+ExtractBtn.Parent = EditorScroll
+
+local ExtractBtnCorner = Instance.new("UICorner")
+ExtractBtnCorner.CornerRadius = UDim.new(0, 4)
+ExtractBtnCorner.Parent = ExtractBtn
 
 ExtractBtn.Activated:Connect(function()
-    local char = LocalPlayer.Character
-    for _, child in ipairs(char:GetChildren()) do
-        if child:IsA("Accessory") then
-            extractAccessory(child, "Default")
-        end
-    end
-    saveProfileData()
-    print("Extraction Complete. Data saved to " .. FILE_NAME)
+	local char = LocalPlayer.Character
+	if not char then return end
+	
+	local head = char:FindFirstChild("Head")
+	if not head then return end
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if not targetFolder then return end
+
+	local extractedCount = 0
+	ExtractBtn.Text = "EXTRACTING..."
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
+	
+	for _, child in ipairs(char:GetChildren()) do
+		if child:IsA("Accessory") and not table.find(activeClientInstances, child) then
+			local handle = child:FindFirstChild("Handle") or child:FindFirstChildWhichIsA("BasePart", true)
+			if handle and handle:IsA("BasePart") then
+				local assetId = 0
+				local mesh = handle:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh and mesh.MeshId ~= "" then
+					local rawId = string.match(mesh.MeshId, "%d+")
+					if rawId then assetId = tonumber(rawId) end
+				end
+
+				local internalName = child.Name
+				local cloneCopy = child:Clone()
+				cloneCopy.Name = internalName
+				
+				for _, subItem in ipairs(cloneCopy:GetDescendants()) do
+					if subItem:IsA("Weld") or subItem:IsA("ManualWeld") or subItem:IsA("WeldConstraint") or subItem:IsA("Attachment") or subItem:IsA("RigidConstraint") then
+						subItem:Destroy()
+					end
+				end
+				cloneCopy.Parent = targetFolder
+				
+				-- Capture full visual mapping for reconstruction later
+				if not ExtractedVisuals[selectedTierName] then ExtractedVisuals[selectedTierName] = {} end
+				ExtractedVisuals[selectedTierName][internalName] = {}
+				
+				for _, part in ipairs(cloneCopy:GetDescendants()) do
+					if part:IsA("BasePart") then
+						local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
+						ExtractedVisuals[selectedTierName][internalName][part.Name] = {
+							MeshId = pMesh and pMesh.MeshId or "",
+							TextureId = pMesh and pMesh.TextureId or "",
+							SizeX = part.Size.X, SizeY = part.Size.Y, SizeZ = part.Size.Z
+						}
+					end
+				end
+				
+				if assetId > 0 then
+					if not table.find(AssetIdsToLoad[selectedTierName], assetId) then
+						table.insert(AssetIdsToLoad[selectedTierName], assetId)
+					end
+				else
+					if not table.find(ExtractedNamesToLoad[selectedTierName], internalName) then
+						table.insert(ExtractedNamesToLoad[selectedTierName], internalName)
+					end
+				end
+				
+				initializeItemData(selectedTierName, cloneCopy)
+				
+				local relativeCFrame = head.CFrame:ToObjectSpace(handle.CFrame)
+				local offsetX, offsetY, offsetZ = relativeCFrame.X, relativeCFrame.Y, relativeCFrame.Z
+				local rX, rY, rZ = relativeCFrame:ToEulerAnglesXYZ()
+				local rotX, rotY, rotZ = math.deg(rX), math.deg(rY), math.deg(rZ)
+				
+				local scaleX, scaleY, scaleZ = 1, 1, 1
+				if mesh then
+					scaleX, scaleY, scaleZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
+				else
+					scaleX, scaleY, scaleZ = handle.Size.X, handle.Size.Y, handle.Size.Z
+				end
+				
+				if CustomOffsets[selectedTierName] and CustomOffsets[selectedTierName][internalName] then
+					CustomOffsets[selectedTierName][internalName]["Handle"] = {
+						offsetX = offsetX, offsetY = offsetY, offsetZ = offsetZ,
+						rotateX = rotX, rotateY = rotY, rotateZ = rotZ,
+						scaleX = scaleX, scaleY = scaleY, scaleZ = scaleZ
+					}
+				end
+				extractedCount = extractedCount + 1
+			end
+		end
+	end
+	
+	saveProfileData()
+	updateItemUI()
+	updateEditorUI()
+	
+	if isPreviewingMode then
+		runUpdatePreviewCycle()
+	elseif LocalPlayer.Character then
+		applyPreset(LocalPlayer.Character, lastPreset)
+	end
+	
+	ExtractBtn.Text = "EXTRACTED (" .. tostring(extractedCount) .. ")"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+	task.wait(1.2)
+	ExtractBtn.Text = "EXTRACT ACCESSORIES"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
 end)
+
+updateEditorUI = function()
+	if selectedItemName == "" then
+		compSelectBtn.Text = "No Item Selected"
+		for _, box in pairs(inputs) do box.Text = "" end
+		return
+	end
+	
+	compSelectBtn.Text = "Part: " .. selectedSubPartName
+	compDropdownScroll:ClearAllChildren()
+	
+	local dropLayout = Instance.new("UIListLayout")
+	dropLayout.Parent = compDropdownScroll
+	
+	local itemProfile = CustomOffsets[selectedTierName][selectedItemName]
+	if not itemProfile then return end
+	
+	local sorted = {}
+	for n, _ in pairs(itemProfile) do table.insert(sorted, n) end
+	table.sort(sorted, function(a, b) if a == "Handle" then return true elseif b == "Handle" then return false else return a < b end end)
+	
+	for _, pName in ipairs(sorted) do
+		local rBtn = Instance.new("TextButton")
+		rBtn.Size = UDim2.new(1, 0, 0, 22)
+		rBtn.BackgroundColor3 = (pName == selectedSubPartName) and Color3.fromRGB(0, 120, 60) or Color3.fromRGB(30, 30, 35)
+		rBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		rBtn.Text = pName
+		rBtn.Font = Enum.Font.Gotham
+		rBtn.TextSize = 10
+		rBtn.Parent = compDropdownScroll
+		
+		rBtn.Activated:Connect(function()
+			selectedSubPartName = pName
+			dropDownWrapper.Visible = false
+			updateEditorUI()
+			highlightSelectedSubPart()
+		end)
+	end
+	compDropdownScroll.CanvasSize = UDim2.new(0, 0, 0, #sorted * 22)
+	
+	local pData = itemProfile[selectedSubPartName]
+	if pData then
+		inputs["offsetX"].Text = tostring(pData.offsetX or 0)
+		inputs["offsetY"].Text = tostring(pData.offsetY or 0)
+		inputs["offsetZ"].Text = tostring(pData.offsetZ or 0)
+		inputs["rotateX"].Text = tostring(pData.rotateX or 0)
+		inputs["rotateY"].Text = tostring(pData.rotateY or 0)
+		inputs["rotateZ"].Text = tostring(pData.rotateZ or 0)
+		inputs["scaleX"].Text  = tostring(pData.scaleX or 1)
+		inputs["scaleY"].Text  = tostring(pData.scaleY or 1)
+		inputs["scaleZ"].Text  = tostring(pData.scaleZ or 1)
+	end
+end
+
+updateItemUI = function()
+	ItemSelectionPanel:ClearAllChildren()
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 4)
+	listLayout.Parent = ItemSelectionPanel
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if not targetFolder then return end
+	
+	local children = targetFolder:GetChildren()
+	if #children == 0 then
+		selectedItemName = ""
+		updateEditorUI()
+		return
+	end
+	
+	for _, child in ipairs(children) do
+		local iBtn = Instance.new("TextButton")
+		iBtn.Size = UDim2.new(1, 0, 0, 26)
+		iBtn.BackgroundColor3 = (child.Name == selectedItemName) and Color3.fromRGB(0, 90, 160) or Color3.fromRGB(35, 35, 40)
+		iBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		iBtn.Text = child.Name
+		iBtn.Font = Enum.Font.GothamSemibold
+		iBtn.TextSize = 10
+		iBtn.Parent = ItemSelectionPanel
+		
+		iBtn.Activated:Connect(function()
+			selectedItemName = child.Name
+			selectedSubPartName = "Handle"
+			updateItemUI()
+			updateEditorUI()
+			highlightSelectedSubPart()
+		end)
+	end
+	ItemSelectionPanel.CanvasSize = UDim2.new(0, 0, 0, #children * 30)
+end
+
+updateTierUI = function()
+	TierSelectionPanel:ClearAllChildren()
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 4)
+	listLayout.Parent = TierSelectionPanel
+	
+	local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
+	for _, tName in ipairs(tiers) do
+		local tBtn = Instance.new("TextButton")
+		tBtn.Size = UDim2.new(1, 0, 0, 26)
+		tBtn.BackgroundColor3 = (tName == selectedTierName) and Color3.fromRGB(120, 80, 0) or Color3.fromRGB(35, 35, 40)
+		tBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		tBtn.Text = tName
+		tBtn.Font = Enum.Font.GothamBold
+		tBtn.TextSize = 10
+		tBtn.Parent = TierSelectionPanel
+		
+		tBtn.Activated:Connect(function()
+			selectedTierName = tName
+			selectedItemName = ""
+			selectedSubPartName = "Handle"
+			updateTierUI()
+			updateItemUI()
+			updateEditorUI()
+			clearActiveHighlight()
+			
+			if isPreviewingMode then
+				runUpdatePreviewCycle()
+			end
+		end)
+	end
+	TierSelectionPanel.CanvasSize = UDim2.new(0, 0, 0, #tiers * 30)
+end
+
+local function batchRehydrateSavedAssets()
+	local count = 0
+	for tierName, idList in pairs(AssetIdsToLoad) do
+		for _, id in ipairs(idList) do
+			count = count + 1
+			task.spawn(function()
+				injectAssetId(id, tierName, true)
+				if tierName == selectedTierName then
+					updateItemUI()
+					updateEditorUI()
+				end
+			end)
+		end
+	end
+	
+	for tierName, extractionList in pairs(ExtractedNamesToLoad) do
+		for _, name in ipairs(extractionList) do
+			count = count + 1
+			generateExtractedPlaceholderModel(tierName, name)
+		end
+	end
+	
+	task.wait(0.1)
+	updateItemUI()
+	updateEditorUI()
+end
+
+updateTierUI()
+updateItemUI()
+updateEditorUI()
+drawSaveSlotsInterface()
+batchRehydrateSavedAssets()
+
+if LocalPlayer.Character then
+	task.spawn(monitorHealth, LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(monitorHealth)
+
+Players.PlayerRemoving:Connect(function(player)
+	if player == LocalPlayer then saveProfileData() end
+end)
+
+print("Util Loaded SucceONE POINTYYYsfully.")
