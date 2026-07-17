@@ -732,13 +732,12 @@ local function drawSaveSlotsInterface()
 				selectedSubPartName = "Handle"
 				clearActiveItems()
 			else
-				-- CRITICAL FIX: Direct matrix validation injection during runtime generation
+				-- Load structures directly into active profile maps
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
 				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
 				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
 				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
 				
-				-- Sequential tracking variable to count total items being loaded
 				local totalLoads = 0
 				
 				for tierName, idList in pairs(AssetIdsToLoad) do
@@ -757,7 +756,6 @@ local function drawSaveSlotsInterface()
 					end
 				end
 				
-				-- Yield thread slightly if assets exist, giving physical folders time to register elements
 				if totalLoads > 0 then
 					task.wait(0.35)
 				end
@@ -824,16 +822,40 @@ local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
 
+-- FIXED ADVANCED INJECTION LAYER: Automatically falls back to local database reconstruction if rbxassetid fails
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
 	
+	-- Try standard executor loading
 	local success, assetModel = pcall(function()
 		return game:GetObjects("rbxassetid://" .. id)[1]
 	end)
 	
+	-- SILENT-FAILURE BACKUP SYSTEM: Rebuild from ExtractedVisuals if the ID can't be fetched online
+	if (not success or not assetModel) and ExtractedVisuals[tierName] then
+		for itemName, parts in pairs(ExtractedVisuals[tierName]) do
+			local match = false
+			for partName, visualData in pairs(parts) do
+				if string.find(visualData.MeshId or "", tostring(id)) then
+					match = true
+					break
+				end
+			end
+			
+			if match then
+				generateExtractedPlaceholderModel(tierName, itemName)
+				assetModel = targetFolder:FindFirstChild(itemName)
+				if assetModel then success = true break end
+			end
+		end
+	end
+	
 	if success and assetModel then
-		assetModel.Name = "Asset_" .. tostring(id)
+		if not string.find(assetModel.Name, "Asset_") and not assetModel:IsA("Accessory") then
+			assetModel.Name = "Asset_" .. tostring(id)
+		end
+		
 		assetModel.Parent = targetFolder
 		
 		if not AssetIdsToLoad[tierName] then AssetIdsToLoad[tierName] = {} end
@@ -1258,4 +1280,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded1043922.")
+print("Util Loaded104299999.")
