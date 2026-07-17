@@ -474,7 +474,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = MainFrame or ScreenGui
+MainFrame.Parent = ScreenGui -- FIXED: Parents strictly to ScreenGui to avoid self-parenting stack crashes
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -1293,4 +1293,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded1042.")
+print("Util Loaded1042001.")
