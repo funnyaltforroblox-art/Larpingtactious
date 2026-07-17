@@ -25,6 +25,7 @@ local Config = {
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
 local ExtractedNamesToLoad = {} -- Explicit tracking for extracted item names to enforce persistence
+local ExtractedVisuals = {}     -- Stores MeshId, TextureId, and structural properties for full rehydration
 local SaveSlots = {} -- Matrix for slots 1-5
 local SlotNames = {} -- Custom mapping for user-renamed slots
 local lastPreset = ""
@@ -48,6 +49,7 @@ local function saveProfileData()
 				Offsets = CustomOffsets,
 				AssetIds = AssetIdsToLoad,
 				ExtractedNames = ExtractedNamesToLoad,
+				ExtractedVisuals = ExtractedVisuals,
 				Slots = SaveSlots,
 				SlotNames = SlotNames
 			}
@@ -80,6 +82,7 @@ local function loadProfileData()
 			CustomOffsets = parsedData.Offsets or {}
 			AssetIdsToLoad = parsedData.AssetIds or {}
 			ExtractedNamesToLoad = parsedData.ExtractedNames or {}
+			ExtractedVisuals = parsedData.ExtractedVisuals or {}
 			SaveSlots = parsedData.Slots or {}
 			SlotNames = parsedData.SlotNames or {}
 			print("[FEX Local Engine]: Successfully loaded presets and slots from workspace/" .. FILE_NAME)
@@ -129,6 +132,7 @@ local function ensureSubFolder(name)
 	if not CustomOffsets[name] then CustomOffsets[name] = {} end
 	if not AssetIdsToLoad[name] then AssetIdsToLoad[name] = {} end
 	if not ExtractedNamesToLoad[name] then ExtractedNamesToLoad[name] = {} end
+	if not ExtractedVisuals[name] then ExtractedVisuals[name] = {} end
 end
 
 ensureSubFolder(Config.SelectedDefault)
@@ -229,7 +233,6 @@ local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
 	if not head then return end
 	
-	-- FIXED: If data already exists globally for this name, don't wipe it out via baseline initialization
 	if not (CustomOffsets[tierName] and CustomOffsets[tierName][item.Name]) then
 		initializeItemData(tierName, item)
 	end
@@ -309,7 +312,6 @@ local function localAttach(character, tierName, item)
 	
 	local rootWeld = Instance.new("Weld")
 	rootWeld.Name = "AccessoryWeld"
-	
 	rootWeld.Part0 = head
 	rootWeld.Part1 = handle
 	
@@ -371,29 +373,29 @@ local function monitorHealth(character)
 	forceRecalculateHealthPreset(character)
 end
 
--- Helper utility function to programmatically rebuild raw structural item instances for extracted items that lack a catalog web id asset context
+-- UPGRADED REHYDRATION SYSTEM: Now fully builds meshes from captured data matrices
 local function generateExtractedPlaceholderModel(tierName, itemName)
 	local folder = TargetPresetFolder:FindFirstChild(tierName)
 	if not folder or folder:FindFirstChild(itemName) then return end
 	
-	local itemProfile = CustomOffsets[tierName] and CustomOffsets[tierName][itemName]
-	if not itemProfile then return end
+	local visualProfile = ExtractedVisuals[tierName] and ExtractedVisuals[tierName][itemName]
+	if not visualProfile then return end
 	
 	local fakeAccessory = Instance.new("Accessory")
 	fakeAccessory.Name = itemName
 	
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = Vector3.new(1, 1, 1)
-	handle.Parent = fakeAccessory
-	
-	for componentName, _ in pairs(itemProfile) do
-		if componentName ~= "Handle" then
-			local componentPart = Instance.new("Part")
-			componentPart.Name = componentName
-			componentPart.Size = Vector3.new(1, 1, 1)
-			componentPart.Parent = fakeAccessory
-		end
+	for partName, visualData in pairs(visualProfile) do
+		local part = Instance.new("MeshPart")
+		part.Name = partName
+		part.Size = Vector3.new(visualData.SizeX or 1, visualData.SizeY or 1, visualData.SizeZ or 1)
+		
+		local sm = Instance.new("SpecialMesh")
+		sm.MeshId = visualData.MeshId or ""
+		sm.TextureId = visualData.TextureId or ""
+		sm.Scale = Vector3.new(1, 1, 1)
+		sm.Parent = part
+		
+		part.Parent = fakeAccessory
 	end
 	
 	fakeAccessory.Parent = folder
@@ -575,7 +577,7 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 end)
 
 -- ====================================================================
--- SAVE SLOTS ENGINE PANEL (WITH CUSTOM RENAMING FUNCTION)
+-- SAVE SLOTS ENGINE PANEL
 -- ====================================================================
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
@@ -619,7 +621,6 @@ local function drawSaveSlotsInterface()
 		cardCorner.CornerRadius = UDim.new(0, 4)
 		cardCorner.Parent = card
 		
-		-- Custom Text Field / Label Header
 		local statusLabel = Instance.new("TextLabel")
 		statusLabel.Size = UDim2.new(1, -30, 0, 16)
 		statusLabel.Position = UDim2.new(0, 6, 0, 2)
@@ -631,7 +632,6 @@ local function drawSaveSlotsInterface()
 		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 		statusLabel.Parent = card
 		
-		-- Mini Rename Action Input Trigger Button
 		local renameBtn = Instance.new("TextBox")
 		renameBtn.Size = UDim2.new(0, 22, 0, 14)
 		renameBtn.Position = UDim2.new(1, -26, 0, 3)
@@ -648,9 +648,9 @@ local function drawSaveSlotsInterface()
 		rnCorner.Parent = renameBtn
 		
 		renameBtn.FocusLost:Connect(function(enterPressed)
-			local filteredText = string.gsub(renameBtn.Text, "^%s*(.-)%s*$", "%1") -- trim spaces
+			local filteredText = string.gsub(renameBtn.Text, "^%s*(.-)%s*$", "%1")
 			if filteredText ~= "" and filteredText ~= "✏️" and filteredText ~= "Invalid!" then
-				SlotNames[slotKey] = string.sub(filteredText, 1, 16) -- Cap length to 16 chars
+				SlotNames[slotKey] = string.sub(filteredText, 1, 16)
 			else
 				SlotNames[slotKey] = "SLOT " .. slotKey
 			end
@@ -687,46 +687,36 @@ local function drawSaveSlotsInterface()
 		sCc.CornerRadius = UDim.new(0, 3)
 		sCc.Parent = saveBtn
 		
-		-- Direct Overwrite Save Execution Handler
 		saveBtn.Activated:Connect(function()
 			SaveSlots[slotKey] = {
 				Empty = false,
 				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
 				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad)),
-				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad))
+				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad)),
+				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedVisuals))
 			}
 			saveProfileData()
 			drawSaveSlotsInterface()
-			
-			for _, element in ipairs(SlotFramePanel:GetChildren()) do
-				if element:IsA("Frame") and element:FindFirstChild(slotDisplayName) then
-					local targetSave = element:FindFirstChild("SAVE") or element:FindFirstChildWhichIsA("TextButton")
-					if targetSave and targetSave.Position.X.Offset > 50 then
-						targetSave.Text = "SAVED!"
-						targetSave.BackgroundColor3 = Color3.fromRGB(0, 150, 80)
-						task.wait(0.8)
-						drawSaveSlotsInterface()
-					end
-				end
-			end
 		end)
 		
-		-- Load action execution mapping
 		loadBtn.Activated:Connect(function()
 			if isEmpty then
 				CustomOffsets = {}
 				AssetIdsToLoad = {}
 				ExtractedNamesToLoad = {}
+				ExtractedVisuals = {}
 				local tiers = {Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium, Config.SelectedMajor, Config.SelectedCritical}
 				for _, tName in ipairs(tiers) do
 					CustomOffsets[tName] = {}
 					AssetIdsToLoad[tName] = {}
 					ExtractedNamesToLoad[tName] = {}
+					ExtractedVisuals[tName] = {}
 				end
 			else
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
 				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
 				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
+				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
 			end
 			
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
@@ -736,13 +726,11 @@ local function drawSaveSlotsInterface()
 			saveProfileData()
 			
 			if not isEmpty then
-				-- Restore Asset IDs
 				for tierName, idList in pairs(AssetIdsToLoad) do
 					for _, id in ipairs(idList) do
 						injectAssetId(id, tierName, true)
 					end
 				end
-				-- Restore Extracted Custom Objects
 				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
 					for _, name in ipairs(extractionList) do
 						generateExtractedPlaceholderModel(tierName, name)
@@ -765,7 +753,7 @@ local function drawSaveSlotsInterface()
 			updateItemUI()
 			updateEditorUI()
 			
-			loadBtn.Text = isEmpty and "CLEARED!" or "LOADED!"
+			loadBtn.Text = "LOADED!"
 			task.wait(0.8)
 			loadBtn.Text = "LOAD"
 		end)
@@ -960,7 +948,7 @@ createMatrixInput("Scale Y:",  "scaleY",  17)
 createMatrixInput("Scale Z:",  "scaleZ",  18)
 
 -- ====================================================================
--- EXTRACTION ENGINE DEVELOPMENT FOR SERVER-BOUND AVATAR ACCESSORIES
+-- ADVANCED EXTRACTION ENGINE: Slices and records structural visual properties
 -- ====================================================================
 local ExtractBtn = Instance.new("TextButton")
 ExtractBtn.Size = UDim2.new(1, 0, 0, 30)
@@ -1000,11 +988,6 @@ ExtractBtn.Activated:Connect(function()
 					local rawId = string.match(mesh.MeshId, "%d+")
 					if rawId then assetId = tonumber(rawId) end
 				end
-				
-				if assetId == 0 and child:FindFirstChildWhichIsA("Script") == nil then
-					local rawId = string.match(child.Name, "%d+")
-					if rawId then assetId = tonumber(rawId) end
-				end
 
 				local internalName = child.Name
 				local cloneCopy = child:Clone()
@@ -1016,6 +999,21 @@ ExtractBtn.Activated:Connect(function()
 					end
 				end
 				cloneCopy.Parent = targetFolder
+				
+				-- Capture full visual mapping for reconstruction later
+				if not ExtractedVisuals[selectedTierName] then ExtractedVisuals[selectedTierName] = {} end
+				ExtractedVisuals[selectedTierName][internalName] = {}
+				
+				for _, part in ipairs(cloneCopy:GetDescendants()) do
+					if part:IsA("BasePart") then
+						local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
+						ExtractedVisuals[selectedTierName][internalName][part.Name] = {
+							MeshId = pMesh and pMesh.MeshId or "",
+							TextureId = pMesh and pMesh.TextureId or "",
+							SizeX = part.Size.X, SizeY = part.Size.Y, SizeZ = part.Size.Z
+						}
+					end
+				end
 				
 				if assetId > 0 then
 					if not table.find(AssetIdsToLoad[selectedTierName], assetId) then
@@ -1195,10 +1193,7 @@ updateTierUI = function()
 end
 
 local function batchRehydrateSavedAssets()
-	print("[FEX Restorer]: Parsing structure for saved accessories...")
 	local count = 0
-	
-	-- 1. Hydrate Catalog Asset IDs
 	for tierName, idList in pairs(AssetIdsToLoad) do
 		for _, id in ipairs(idList) do
 			count = count + 1
@@ -1212,7 +1207,6 @@ local function batchRehydrateSavedAssets()
 		end
 	end
 	
-	-- 2. Hydrate Non-Catalog Extracted Items
 	for tierName, extractionList in pairs(ExtractedNamesToLoad) do
 		for _, name in ipairs(extractionList) do
 			count = count + 1
@@ -1223,19 +1217,14 @@ local function batchRehydrateSavedAssets()
 	task.wait(0.1)
 	updateItemUI()
 	updateEditorUI()
-	print("[FEX Restorer]: Triggered " .. tostring(count) .. " assets for local session generation.")
 end
 
 updateTierUI()
 updateItemUI()
 updateEditorUI()
 drawSaveSlotsInterface()
-
 batchRehydrateSavedAssets()
 
--- ====================================================================
--- INITIALIZATION HOOKS
--- ====================================================================
 if LocalPlayer.Character then
 	task.spawn(monitorHealth, LocalPlayer.Character)
 end
@@ -1245,4 +1234,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Successfull500💮y.")
+print("Util Loaded SucceONE POINTYYYsfully.")
