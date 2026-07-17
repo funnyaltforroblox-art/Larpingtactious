@@ -577,7 +577,7 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 end)
 
 -- ====================================================================
--- SAVE SLOTS ENGINE PANEL
+-- SAVE SLOTS ENGINE PANEL (FIXED PERSISTENCE FOR EXTRACTED ITEMS)
 -- ====================================================================
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
@@ -688,6 +688,11 @@ local function drawSaveSlotsInterface()
 		sCc.Parent = saveBtn
 		
 		saveBtn.Activated:Connect(function()
+			-- Safeguard matrices before slot encoding
+			if not ExtractedNamesToLoad then ExtractedNamesToLoad = {} end
+			if not ExtractedVisuals then ExtractedVisuals = {} end
+			if not AssetIdsToLoad then AssetIdsToLoad = {} end
+
 			SaveSlots[slotKey] = {
 				Empty = false,
 				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
@@ -697,6 +702,13 @@ local function drawSaveSlotsInterface()
 			}
 			saveProfileData()
 			drawSaveSlotsInterface()
+			
+			local originalText = saveBtn.Text
+			saveBtn.Text = "SAVED!"
+			saveBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 70)
+			task.wait(0.8)
+			saveBtn.Text = originalText
+			saveBtn.BackgroundColor3 = Color3.fromRGB(150, 90, 0)
 		end)
 		
 		loadBtn.Activated:Connect(function()
@@ -1234,4 +1246,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded SucceONE POINTYYYsfully.")
+print("Util Loaded Successfully.")
