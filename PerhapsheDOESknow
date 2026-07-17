@@ -947,7 +947,8 @@ ExtractBtn.Activated:Connect(function()
 					local c0 = weld.C0
 					offsetX, offsetY, offsetZ = c0.X, c0.Y, c0.Z
 					local rX, rY, rZ = c0:ToEulerAnglesXYZ()
-					rotX, rotY, rotZ = math.degrees(rX), math.degrees(rY), math.degrees(rZ)
+					-- FIX applied here: math.deg instead of math.degrees
+					rotX, rotY, rotZ = math.deg(rX), math.deg(rY), math.deg(rZ)
 				end
 				
 				if mesh then
@@ -1147,4 +1148,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Utildid not cake..")
+print("Util LoaOORHAded 8383883ly.")
