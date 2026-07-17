@@ -527,7 +527,7 @@ EditorListLayout.Padding = UDim.new(0, 5)
 EditorListLayout.Parent = EditorScroll
 
 EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 15)
+	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 25)
 end)
 
 -- ====================================================================
@@ -879,13 +879,13 @@ createMatrixInput("Scale Z:",  "scaleZ",  18)
 -- EXTRACTION ENGINE DEVELOPMENT FOR SERVER-BOUND AVATAR ACCESSORIES
 -- ====================================================================
 local ExtractBtn = Instance.new("TextButton")
-ExtractBtn.Size = UDim2.new(1, 0, 0, 26)
+ExtractBtn.Size = UDim2.new(1, 0, 0, 30)
 ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
 ExtractBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ExtractBtn.Text = "EXTRACT ACCESSORIES"
 ExtractBtn.Font = Enum.Font.GothamBold
 ExtractBtn.TextSize = 11
-ExtractBtn.LayoutOrder = 30
+ExtractBtn.LayoutOrder = 50 -- Ensures it formats sequentially right after the text inputs inside the layout stream
 ExtractBtn.Parent = EditorScroll
 
 local ExtractBtnCorner = Instance.new("UICorner")
@@ -1147,4 +1147,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util LWILL IT CAKE???")
+print("Utildid not cake..")
