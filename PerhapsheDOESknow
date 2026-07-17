@@ -579,100 +579,109 @@ end)
 -- ====================================================================
 -- SAVE SLOTS ENGINE PANEL
 -- ====================================================================
-local SlotFramePanel = Instance.new("ScrollingFrame")
-SlotFramePanel.Name = "SlotFramePanel"
-SlotFramePanel.Size = UDim2.new(0, 160, 0, 215)
-SlotFramePanel.Position = UDim2.new(0, 440, 0, 40)
-SlotFramePanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-SlotFramePanel.BorderSizePixel = 0
-SlotFramePanel.CanvasSize = UDim2.new(0, 0, 0, 260)
-SlotFramePanel.ScrollBarThickness = 2
-SlotFramePanel.Parent = MainFrame
+ExtractBtn.Activated:Connect(function()
+	local char = LocalPlayer.Character
+	if not char then return end
+	
+	local head = char:FindFirstChild("Head")
+	if not head then return end
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if not targetFolder then return end
 
-local SlotPanelCorner = Instance.new("UICorner")
-SlotPanelCorner.CornerRadius = UDim.new(0, 6)
-SlotPanelCorner.Parent = SlotFramePanel
+	local extractedCount = 0
+	ExtractBtn.Text = "EXTRACTING..."
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(130, 90, 0)
+	
+	for _, child in ipairs(char:GetChildren()) do
+		if child:IsA("Accessory") and not table.find(activeClientInstances, child) then
+			local handle = child:FindFirstChild("Handle") or child:FindFirstChildWhichIsA("BasePart", true)
+			if handle and handle:IsA("BasePart") then
+				-- FIX: Use a Unique ID to prevent mirroring
+				local uniqueInstanceID = child.Name .. "_" .. tostring(tick())
+				
+				local assetId = 0
+				local mesh = handle:FindFirstChildWhichIsA("SpecialMesh")
+				if mesh and mesh.MeshId ~= "" then
+					local rawId = string.match(mesh.MeshId, "%d+")
+					if rawId then assetId = tonumber(rawId) end
+				end
 
-local SlotListLayout = Instance.new("UIListLayout")
-SlotListLayout.Padding = UDim.new(0, 6)
-SlotListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-SlotListLayout.Parent = SlotFramePanel
-
-local updateTierUI, updateItemUI, updateEditorUI
-
-local function drawSaveSlotsInterface()
-	for _, child in ipairs(SlotFramePanel:GetChildren()) do
-		if child:IsA("Frame") then child:Destroy() end
+				local cloneCopy = child:Clone()
+				cloneCopy.Name = uniqueInstanceID
+				
+				for _, subItem in ipairs(cloneCopy:GetDescendants()) do
+					if subItem:IsA("Weld") or subItem:IsA("ManualWeld") or subItem:IsA("WeldConstraint") or subItem:IsA("Attachment") or subItem:IsA("RigidConstraint") then
+						subItem:Destroy()
+					end
+				end
+				cloneCopy.Parent = targetFolder
+				
+				-- Capture visual mapping using the Unique ID
+				if not ExtractedVisuals[selectedTierName] then ExtractedVisuals[selectedTierName] = {} end
+				ExtractedVisuals[selectedTierName][uniqueInstanceID] = {}
+				
+				for _, part in ipairs(cloneCopy:GetDescendants()) do
+					if part:IsA("BasePart") then
+						local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
+						ExtractedVisuals[selectedTierName][uniqueInstanceID][part.Name] = {
+							MeshId = pMesh and pMesh.MeshId or "",
+							TextureId = pMesh and pMesh.TextureId or "",
+							SizeX = part.Size.X, SizeY = part.Size.Y, SizeZ = part.Size.Z
+						}
+					end
+				end
+				
+				-- Store tracking using the Unique ID
+				if not table.find(ExtractedNamesToLoad[selectedTierName], uniqueInstanceID) then
+					table.insert(ExtractedNamesToLoad[selectedTierName], uniqueInstanceID)
+				end
+				
+				initializeItemData(selectedTierName, cloneCopy)
+				
+				-- Offset Calculation
+				local relativeCFrame = head.CFrame:ToObjectSpace(handle.CFrame)
+				local offsetX, offsetY, offsetZ = relativeCFrame.X, relativeCFrame.Y, relativeCFrame.Z
+				local rX, rY, rZ = relativeCFrame:ToEulerAnglesXYZ()
+				local rotX, rotY, rotZ = math.deg(rX), math.deg(rY), math.deg(rZ)
+				
+				local scaleX, scaleY, scaleZ = 1, 1, 1
+				if mesh then
+					scaleX, scaleY, scaleZ = mesh.Scale.X, mesh.Scale.Y, mesh.Scale.Z
+				else
+					scaleX, scaleY, scaleZ = handle.Size.X, handle.Size.Y, handle.Size.Z
+				end
+				
+				if CustomOffsets[selectedTierName] and CustomOffsets[selectedTierName][uniqueInstanceID] then
+					CustomOffsets[selectedTierName][uniqueInstanceID]["Handle"] = {
+						offsetX = offsetX, offsetY = offsetY, offsetZ = offsetZ,
+						rotateX = rotX, rotateY = rotY, rotateZ = rotZ,
+						scaleX = scaleX, scaleY = scaleY, scaleZ = scaleZ
+					}
+				end
+				extractedCount = extractedCount + 1
+			end
+		end
 	end
 	
-	for i = 1, 5 do
-		local slotKey = tostring(i)
-		local slotData = SaveSlots[slotKey]
-		local isEmpty = slotData.Empty == true
-		local slotDisplayName = SlotNames[slotKey] or ("SLOT " .. slotKey)
-		
-		local card = Instance.new("Frame")
-		card.Size = UDim2.new(0, 144, 0, 44)
-		card.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-		card.BorderSizePixel = 0
-		card.Parent = SlotFramePanel
-		
-		local cardCorner = Instance.new("UICorner")
-		cardCorner.CornerRadius = UDim.new(0, 4)
-		cardCorner.Parent = card
-		
-		local statusLabel = Instance.new("TextLabel")
-		statusLabel.Size = UDim2.new(1, -30, 0, 16)
-		statusLabel.Position = UDim2.new(0, 6, 0, 2)
-		statusLabel.BackgroundTransparency = 1
-		statusLabel.Font = Enum.Font.GothamBold
-		statusLabel.Text = slotDisplayName .. (isEmpty and " [EMPTY]" or "")
-		statusLabel.TextColor3 = isEmpty and Color3.fromRGB(130, 130, 140) or Color3.fromRGB(0, 255, 150)
-		statusLabel.TextSize = 9
-		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-		statusLabel.Parent = card
-		
-		local renameBtn = Instance.new("TextBox")
-		renameBtn.Size = UDim2.new(0, 22, 0, 14)
-		renameBtn.Position = UDim2.new(1, -26, 0, 3)
-		renameBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-		renameBtn.Font = Enum.Font.GothamBold
-		renameBtn.Text = "✏️"
-		renameBtn.TextColor3 = Color3.fromRGB(200, 200, 205)
-		renameBtn.TextSize = 8
-		renameBtn.ClearTextOnFocus = true
-		renameBtn.Parent = card
-		
-		local rnCorner = Instance.new("UICorner")
-		rnCorner.CornerRadius = UDim.new(0, 3)
-		rnCorner.Parent = renameBtn
-		
-		renameBtn.FocusLost:Connect(function(enterPressed)
-			local filteredText = string.gsub(renameBtn.Text, "^%s*(.-)%s*$", "%1")
-			if filteredText ~= "" and filteredText ~= "✏️" and filteredText ~= "Invalid!" then
-				SlotNames[slotKey] = string.sub(filteredText, 1, 16)
-			else
-				SlotNames[slotKey] = "SLOT " .. slotKey
-			end
-			saveProfileData()
-			drawSaveSlotsInterface()
-		end)
-		
-		local loadBtn = Instance.new("TextButton")
-		loadBtn.Size = UDim2.new(0, 62, 0, 18)
-		loadBtn.Position = UDim2.new(0, 6, 0, 20)
-		loadBtn.BackgroundColor3 = isEmpty and Color3.fromRGB(45, 45, 50) or Color3.fromRGB(0, 100, 180)
-		loadBtn.Font = Enum.Font.GothamBold
-		loadBtn.Text = "LOAD"
-		loadBtn.TextColor3 = isEmpty and Color3.fromRGB(160, 160, 160) or Color3.fromRGB(255, 255, 255)
-		loadBtn.TextSize = 9
-		loadBtn.AutoButtonColor = true
-		loadBtn.Parent = card
-		
-		local lCc = Instance.new("UICorner")
-		lCc.CornerRadius = UDim.new(0, 3)
-		lCc.Parent = loadBtn
-		
+	saveProfileData()
+	updateItemUI()
+	updateEditorUI()
+	
+	if isPreviewingMode then
+		runUpdatePreviewCycle()
+	elseif LocalPlayer.Character then
+		applyPreset(LocalPlayer.Character, lastPreset)
+	end
+	
+	ExtractBtn.Text = "EXTRACTED (" .. tostring(extractedCount) .. ")"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 70)
+	task.wait(1.2)
+	ExtractBtn.Text = "EXTRACT ACCESSORIES"
+	ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
+end)
+
+
 		local saveBtn = Instance.new("TextButton")
 		saveBtn.Size = UDim2.new(0, 62, 0, 18)
 		saveBtn.Position = UDim2.new(0, 76, 0, 20)
