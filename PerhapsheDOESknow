@@ -712,7 +712,13 @@ local function drawSaveSlotsInterface()
 		end)
 		
 		loadBtn.Activated:Connect(function()
+			-- Clear folder models before reading loaded values
+			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
+				folder:ClearAllChildren()
+			end
+
 			if isEmpty then
+				-- SAFE LOAD ACTION: Flush local runtime workspace data without rewriting the global SaveSlots profile
 				CustomOffsets = {}
 				AssetIdsToLoad = {}
 				ExtractedNamesToLoad = {}
@@ -724,20 +730,16 @@ local function drawSaveSlotsInterface()
 					ExtractedNamesToLoad[tName] = {}
 					ExtractedVisuals[tName] = {}
 				end
+				selectedItemName = ""
+				selectedSubPartName = "Handle"
+				clearActiveItems()
 			else
+				-- VALID SLOT LOAD: Re-instantiate structural parameters from slot tables safely
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
 				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
 				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
 				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
-			end
-			
-			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
-				folder:ClearAllChildren()
-			end
-			
-			saveProfileData()
-			
-			if not isEmpty then
+				
 				for tierName, idList in pairs(AssetIdsToLoad) do
 					for _, id in ipairs(idList) do
 						injectAssetId(id, tierName, true)
@@ -749,9 +751,6 @@ local function drawSaveSlotsInterface()
 					end
 				end
 				task.wait(0.2)
-			else
-				selectedItemName = ""
-				selectedSubPartName = "Handle"
 			end
 			
 			if isPreviewingMode then
@@ -1249,4 +1248,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded92.")
+print("Util Loaded1042.")
