@@ -1,146 +1,83 @@
--- Health-Based Face & Model Customizer (COMPLETE SCRIPT)
+-- FEX Customizer - Clean Extraction Build
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-
 local LocalPlayer = Players.LocalPlayer
-repeat task.wait() until LocalPlayer:FindFirstChild("PlayerGui")
 
-local FILE_NAME = "FEX_Customizer_Full_Data.json"
-local Config = {
-	SelectedDefault = "face acc", SelectedMinor = "MinorDamage",
-	SelectedMedium = "MediumDamage", SelectedMajor = "MajorDamage", SelectedCritical = "CriticalDamage"
-}
-
-local CustomOffsets, AssetIdsToLoad, ExtractedNamesToLoad, ExtractedVisuals = {}, {}, {}, {}
-local SaveSlots, SlotNames = {}, {}
-local lastPreset, activeClientInstances = "", {}
-local isPreviewingMode = false
-local selectedTierName, selectedItemName, selectedSubPartName = Config.SelectedDefault, "", "Handle"
-local currentHighlightBox = nil
-
-local function deepCopyTable(original)
-	local copy = {}
-	for k, v in pairs(original) do
-		if type(v) == "table" then copy[k] = deepCopyTable(v) else copy[k] = v end
-	end
-	return copy
-end
-
-local function saveProfileData()
-	if writefile then
-		local package = {Offsets=CustomOffsets, AssetIds=AssetIdsToLoad, ExtractedNames=ExtractedNamesToLoad, ExtractedVisuals=ExtractedVisuals, Slots=SaveSlots, SlotNames=SlotNames}
-		writefile(FILE_NAME, HttpService:JSONEncode(package))
-	end
-end
-
-local function loadProfileData()
-	if readfile and isfile and isfile(FILE_NAME) then
-		local success, parsed = pcall(function() return HttpService:JSONDecode(readfile(FILE_NAME)) end)
-		if success and type(parsed) == "table" then
-			CustomOffsets = parsed.Offsets or {}; AssetIdsToLoad = parsed.AssetIds or {}
-			ExtractedNamesToLoad = parsed.ExtractedNames or {}; ExtractedVisuals = parsed.ExtractedVisuals or {}
-			SaveSlots = parsed.Slots or {}; SlotNames = parsed.SlotNames or {}
-		end
-	end
-end
-loadProfileData()
-
+local FILE_NAME = "FEX_Customizer_Clean.json"
 local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets") or Instance.new("Folder", ReplicatedStorage)
 TargetPresetFolder.Name = "FaceAccPresets"
 
-local function injectAssetId(id, tierName)
-	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
-	if not targetFolder then return end
-	local success, assetModel = pcall(function() return game:GetObjects("rbxassetid://" .. id)[1] end)
-	if success and assetModel then
-		assetModel.Name = "Asset_" .. tostring(id)
-		assetModel.Parent = targetFolder
-		if not AssetIdsToLoad[tierName] then AssetIdsToLoad[tierName] = {} end
-		table.insert(AssetIdsToLoad[tierName], id)
-	end
+local CustomOffsets, ExtractedNamesToLoad, ExtractedVisuals, SaveSlots = {}, {}, {}, {}
+
+-- Helper: Deep Copy to prevent memory reference leakage
+local function deepCopyTable(original)
+    local copy = {}
+    for k, v in pairs(original) do
+        if type(v) == "table" then copy[k] = deepCopyTable(v) else copy[k] = v end
+    end
+    return copy
 end
 
-local function generateExtractedPlaceholderModel(tierName, itemName)
-	local folder = TargetPresetFolder:FindFirstChild(tierName)
-	if not folder then return end
-	local visualProfile = ExtractedVisuals[tierName] and ExtractedVisuals[tierName][itemName]
-	if not visualProfile then return end
-	local fakeAccessory = Instance.new("Accessory")
-	fakeAccessory.Name = itemName
-	for partName, v in pairs(visualProfile) do
-		local part = Instance.new("Part", fakeAccessory)
-		part.Name = partName
-		part.Size = Vector3.new(v.SizeX, v.SizeY, v.SizeZ)
-		part.Transparency = v.Transparency
-		part.Color = Color3.fromRGB(v.ColorR, v.ColorG, v.ColorB)
-		if v.MeshId ~= "" then
-			local sm = Instance.new("SpecialMesh", part)
-			sm.MeshId = v.MeshId; sm.TextureId = v.TextureId
-		end
-	end
-	fakeAccessory.Parent = folder
+local function saveProfileData()
+    if writefile then
+        local package = {Offsets = CustomOffsets, ExtractedNames = ExtractedNamesToLoad, ExtractedVisuals = ExtractedVisuals, Slots = SaveSlots}
+        writefile(FILE_NAME, HttpService:JSONEncode(package))
+    end
 end
 
--- GUI Setup
-local ScreenGui = Instance.new("ScreenGui", game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui"))
+-- Extraction Logic: Uses tick() to ensure unique keys for every accessory
+local function extractAccessory(accessory, tierName)
+    local handle = accessory:FindFirstChild("Handle") or accessory:FindFirstChildWhichIsA("BasePart", true)
+    if not handle then return end
+    
+    -- Unique Key: Ensures even if you extract the same item twice, it isn't mirrored
+    local uniqueID = accessory.Name .. "_" .. tostring(tick())
+    
+    if not ExtractedVisuals[tierName] then ExtractedVisuals[tierName] = {} end
+    ExtractedVisuals[tierName][uniqueID] = {}
+    
+    -- Extract Visual Data
+    for _, part in ipairs(accessory:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
+            ExtractedVisuals[tierName][uniqueID][part.Name] = {
+                MeshId = pMesh and pMesh.MeshId or "",
+                TextureId = pMesh and pMesh.TextureId or "",
+                Size = part.Size,
+                Transparency = part.Transparency,
+                Color = {part.Color.R, part.Color.G, part.Color.B}
+            }
+        end
+    end
+    
+    table.insert(ExtractedNamesToLoad[tierName], uniqueID)
+    return uniqueID
+end
+
+-- UI Setup (Simplified for Reliability)
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 610, 0, 320); MainFrame.Position = UDim2.new(0.5, -305, 0.4, -160); MainFrame.Visible = false
-MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame.Size = UDim2.new(0, 400, 0, 200)
+MainFrame.Position = UDim2.new(0.5, -200, 0.5, -100)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Visible = true
 
--- Slot Loading Logic (The Fix)
-local function loadSlot(slotKey)
-	local slotData = SaveSlots[slotKey]
-	if not slotData or slotData.Empty then
-		CustomOffsets, AssetIdsToLoad, ExtractedNamesToLoad, ExtractedVisuals = {}, {}, {}, {}
-	else
-		CustomOffsets = deepCopyTable(slotData.Offsets)
-		AssetIdsToLoad = deepCopyTable(slotData.AssetIds)
-		ExtractedNamesToLoad = deepCopyTable(slotData.ExtractedNames)
-		ExtractedVisuals = deepCopyTable(slotData.ExtractedVisuals)
-	end
-	
-	TargetPresetFolder:ClearAllChildren()
-	for t, ids in pairs(AssetIdsToLoad) do for _, id in ipairs(ids) do injectAssetId(id, t) end end
-	for t, names in pairs(ExtractedNamesToLoad) do for _, name in ipairs(names) do generateExtractedPlaceholderModel(t, name) end end
-end
+local ExtractBtn = Instance.new("TextButton", MainFrame)
+ExtractBtn.Size = UDim2.new(0, 200, 0, 50)
+ExtractBtn.Position = UDim2.new(0.5, -100, 0.5, -25)
+ExtractBtn.Text = "EXTRACT ALL ACCESSORIES"
 
--- Extraction Logic (The Fix for Mirroring)
-local function performExtraction()
-	local char = LocalPlayer.Character
-	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
-	if not char or not targetFolder then return end
-
-	for _, child in ipairs(char:GetChildren()) do
-		if child:IsA("Accessory") then
-			local uniqueName = child.Name .. "_" .. tick() -- Forces unique ID so no items mirror
-			local cloneCopy = child:Clone()
-			cloneCopy.Name = uniqueName
-			cloneCopy.Parent = targetFolder
-			
-			if not ExtractedVisuals[selectedTierName] then ExtractedVisuals[selectedTierName] = {} end
-			ExtractedVisuals[selectedTierName][uniqueName] = {}
-			
-			for _, part in ipairs(cloneCopy:GetDescendants()) do
-				if part:IsA("BasePart") then
-					local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
-					ExtractedVisuals[selectedTierName][uniqueName][part.Name] = {
-						MeshId = mesh and mesh.MeshId or "", TextureId = mesh and mesh.TextureId or "",
-						SizeX = part.Size.X, SizeY = part.Size.Y, SizeZ = part.Size.Z,
-						Transparency = part.Transparency,
-						ColorR = part.Color.R * 255, ColorG = part.Color.G * 255, ColorB = part.Color.B * 255
-					}
-				end
-			end
-			table.insert(ExtractedNamesToLoad[selectedTierName], uniqueName)
-		end
-	end
-	saveProfileData()
-end
-
--- Initialization Loops
-for i = 1, 5 do if not SaveSlots[tostring(i)] then SaveSlots[tostring(i)] = {Empty = true} end end
-MainFrame.Visible = true -- You can toggle this via a button
+ExtractBtn.Activated:Connect(function()
+    local char = LocalPlayer.Character
+    for _, child in ipairs(char:GetChildren()) do
+        if child:IsA("Accessory") then
+            extractAccessory(child, "Default")
+        end
+    end
+    saveProfileData()
+    print("Extraction Complete. Data saved to " .. FILE_NAME)
+end)
