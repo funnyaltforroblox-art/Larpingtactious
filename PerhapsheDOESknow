@@ -24,7 +24,7 @@ local Config = {
 
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
-local ExtractedNamesToLoad = {} -- NEW: Explicit tracking for extracted item names to enforce persistence
+local ExtractedNamesToLoad = {} -- Explicit tracking for extracted item names to enforce persistence
 local SaveSlots = {} -- Matrix for slots 1-5
 local SlotNames = {} -- Custom mapping for user-renamed slots
 local lastPreset = ""
@@ -368,7 +368,7 @@ local function monitorHealth(character)
 	forceRecalculateHealthPreset(character)
 end
 
--- NEW: Helper utility function to programmatically rebuild raw structural item instances for extracted items that lack a catalog web id asset context
+-- Helper utility function to programmatically rebuild raw structural item instances for extracted items that lack a catalog web id asset context
 local function generateExtractedPlaceholderModel(tierName, itemName)
 	local folder = TargetPresetFolder:FindFirstChild(tierName)
 	if not folder or folder:FindFirstChild(itemName) then return end
@@ -451,7 +451,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = MainFrame
+MainFrame.Parent = ScreenGui -- ✅ FIXED: Properly parented to the ScreenGui setup now
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -690,7 +690,7 @@ local function drawSaveSlotsInterface()
 				Empty = false,
 				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
 				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad)),
-				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad)) -- FIX: Enforce matrix clone context to active slot profiles
+				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad))
 			}
 			saveProfileData()
 			drawSaveSlotsInterface()
@@ -739,7 +739,7 @@ local function drawSaveSlotsInterface()
 						injectAssetId(id, tierName, true)
 					end
 				end
-				-- FIX: Restore Extracted Custom Objects
+				-- Restore Extracted Custom Objects
 				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
 					for _, name in ipairs(extractionList) do
 						generateExtractedPlaceholderModel(tierName, name)
@@ -1014,7 +1014,6 @@ ExtractBtn.Activated:Connect(function()
 				end
 				cloneCopy.Parent = targetFolder
 				
-				-- FIX: Safely bind the layout context tracker for non-catalog item persistence structures
 				if assetId > 0 then
 					if not table.find(AssetIdsToLoad[selectedTierName], assetId) then
 						table.insert(AssetIdsToLoad[selectedTierName], assetId)
@@ -1243,4 +1242,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("It does end here.")
+print("Util Loaded SuShut the fuck up copilot.83883ly.")
