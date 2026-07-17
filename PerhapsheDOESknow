@@ -229,7 +229,10 @@ local function localAttach(character, tierName, item)
 	local head = character:WaitForChild("Head", 5)
 	if not head then return end
 	
-	initializeItemData(tierName, item)
+	-- FIXED: If data already exists globally for this name, don't wipe it out via baseline initialization
+	if not (CustomOffsets[tierName] and CustomOffsets[tierName][item.Name]) then
+		initializeItemData(tierName, item)
+	end
 	local itemData = CustomOffsets[tierName][item.Name]
 	if not itemData then return end
 	
@@ -1242,4 +1245,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Successf.....ully.")
+print("Util Loaded Successfull500💮y.")
