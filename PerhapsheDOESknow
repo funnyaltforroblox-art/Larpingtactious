@@ -688,7 +688,6 @@ local function drawSaveSlotsInterface()
 		sCc.Parent = saveBtn
 		
 		saveBtn.Activated:Connect(function()
-			-- Safeguard matrices before slot encoding
 			if not ExtractedNamesToLoad then ExtractedNamesToLoad = {} end
 			if not ExtractedVisuals then ExtractedVisuals = {} end
 			if not AssetIdsToLoad then AssetIdsToLoad = {} end
@@ -712,13 +711,12 @@ local function drawSaveSlotsInterface()
 		end)
 		
 		loadBtn.Activated:Connect(function()
-			-- Clear folder models before reading loaded values
+			-- Clear existing physical folder assets before reconstruction
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
 				folder:ClearAllChildren()
 			end
 
 			if isEmpty then
-				-- SAFE LOAD ACTION: Flush local runtime workspace data without rewriting the global SaveSlots profile
 				CustomOffsets = {}
 				AssetIdsToLoad = {}
 				ExtractedNamesToLoad = {}
@@ -734,25 +732,38 @@ local function drawSaveSlotsInterface()
 				selectedSubPartName = "Handle"
 				clearActiveItems()
 			else
-				-- VALID SLOT LOAD: Re-instantiate structural parameters from slot tables safely
+				-- CRITICAL FIX: Direct matrix validation injection during runtime generation
 				CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets))
 				AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
 				ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
 				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
 				
+				-- Sequential tracking variable to count total items being loaded
+				local totalLoads = 0
+				
 				for tierName, idList in pairs(AssetIdsToLoad) do
 					for _, id in ipairs(idList) do
-						injectAssetId(id, tierName, true)
+						totalLoads = totalLoads + 1
+						task.spawn(function()
+							injectAssetId(id, tierName, true)
+						end)
 					end
 				end
+				
 				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
 					for _, name in ipairs(extractionList) do
+						totalLoads = totalLoads + 1
 						generateExtractedPlaceholderModel(tierName, name)
 					end
 				end
-				task.wait(0.2)
+				
+				-- Yield thread slightly if assets exist, giving physical folders time to register elements
+				if totalLoads > 0 then
+					task.wait(0.35)
+				end
 			end
 			
+			-- Force clean recalculation to update current characters and active viewports
 			if isPreviewingMode then
 				runUpdatePreviewCycle()
 			elseif LocalPlayer.Character then
@@ -1012,7 +1023,6 @@ ExtractBtn.Activated:Connect(function()
 				end
 				cloneCopy.Parent = targetFolder
 				
-				-- Capture full visual mapping for reconstruction later
 				if not ExtractedVisuals[selectedTierName] then ExtractedVisuals[selectedTierName] = {} end
 				ExtractedVisuals[selectedTierName][internalName] = {}
 				
@@ -1228,7 +1238,7 @@ local function batchRehydrateSavedAssets()
 		end
 	end
 	
-	task.wait(0.1)
+	task.wait(0.2)
 	updateItemUI()
 	updateEditorUI()
 end
@@ -1248,4 +1258,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded1042.")
+print("Util Loaded1043922.")
