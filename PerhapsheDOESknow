@@ -826,6 +826,7 @@ injectAssetId = function(id, tierName, isSilentRestore)
 		assetModel.Name = "Asset_" .. tostring(id)
 		assetModel.Parent = targetFolder
 		
+		if not AssetIdsToLoad[tierName] then AssetIdsToLoad[tierName] = {} end
 		if not table.find(AssetIdsToLoad[tierName], id) then
 			table.insert(AssetIdsToLoad[tierName], id)
 		end
@@ -1028,10 +1029,12 @@ ExtractBtn.Activated:Connect(function()
 				end
 				
 				if assetId > 0 then
+					if not AssetIdsToLoad[selectedTierName] then AssetIdsToLoad[selectedTierName] = {} end
 					if not table.find(AssetIdsToLoad[selectedTierName], assetId) then
 						table.insert(AssetIdsToLoad[selectedTierName], assetId)
 					end
 				else
+					if not ExtractedNamesToLoad[selectedTierName] then ExtractedNamesToLoad[selectedTierName] = {} end
 					if not table.find(ExtractedNamesToLoad[selectedTierName], internalName) then
 						table.insert(ExtractedNamesToLoad[selectedTierName], internalName)
 					end
@@ -1246,4 +1249,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Successfully.")
+print("Util Loaded92.")
