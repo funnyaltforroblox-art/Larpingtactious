@@ -1242,4 +1242,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded SuShut the fuck up copilot.83883ly.")
+print("Util Loaded Succes338383883ly.")
