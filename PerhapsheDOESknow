@@ -42,26 +42,26 @@ local injectAssetId
 -- LOCAL FILE SYSTEM SAVE / LOAD PIPELINE
 -- ====================================================================
 local function saveProfileData()
-	task.spawn(function()
-		local success, err = pcall(function()
-			if writefile then
-				local package = {
-					Offsets = CustomOffsets,
-					AssetIds = AssetIdsToLoad,
-					ExtractedNames = ExtractedNamesToLoad,
-					Slots = SaveSlots,
-					SlotNames = SlotNames
-				}
-				local jsonString = HttpService:JSONEncode(package)
-				writefile(FILE_NAME, jsonString)
-			else
-				warn("[FEX Save Warning]: Your executor does not support 'writefile'.")
-			end
-		end)
-		if not success then
-			warn("[FEX Save Error]: Failed to write local preset file: " .. tostring(err))
+	local success, err = pcall(function()
+		if writefile then
+			local package = {
+				Offsets = CustomOffsets,
+				AssetIds = AssetIdsToLoad,
+				ExtractedNames = ExtractedNamesToLoad,
+				Slots = SaveSlots,
+				SlotNames = SlotNames
+			}
+			local jsonString = HttpService:JSONEncode(package)
+			writefile(FILE_NAME, jsonString)
+			print("[FEX Save Engine]: Successfully wrote file to workspace/" .. FILE_NAME)
+		else
+			warn("[FEX Save Warning]: Your executor does not support 'writefile'!")
 		end
 	end)
+	
+	if not success then
+		warn("[FEX Save Error]: Executor failed to save file! Reason: " .. tostring(err))
+	end
 end
 
 local function loadProfileData()
@@ -451,7 +451,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui -- ✅ FIXED: Properly parented to the ScreenGui setup now
+MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -1242,4 +1242,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Succes338383883ly.")
+print("Util Loaded Successf.....ully.")
