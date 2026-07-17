@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, and Clearable Save Slots)
+-- Health-Based Face & Model Customizer (With Preview Mode, Local-Axis Rotation, Clearable Save Slots, and Custom Slot Renaming)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -25,6 +25,7 @@ local Config = {
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
 local SaveSlots = {} -- Matrix for slots 1-5
+local SlotNames = {} -- Custom mapping for user-renamed slots
 local lastPreset = ""
 local activeClientInstances = {}
 local isPreviewingMode = false 
@@ -46,7 +47,8 @@ local function saveProfileData()
 				local package = {
 					Offsets = CustomOffsets,
 					AssetIds = AssetIdsToLoad,
-					Slots = SaveSlots
+					Slots = SaveSlots,
+					SlotNames = SlotNames
 				}
 				local jsonString = HttpService:JSONEncode(package)
 				writefile(FILE_NAME, jsonString)
@@ -76,6 +78,7 @@ local function loadProfileData()
 			CustomOffsets = parsedData.Offsets or {}
 			AssetIdsToLoad = parsedData.AssetIds or {}
 			SaveSlots = parsedData.Slots or {}
+			SlotNames = parsedData.SlotNames or {}
 			print("[FEX Local Engine]: Successfully loaded presets and slots from workspace/" .. FILE_NAME)
 			return
 		end
@@ -85,10 +88,14 @@ end
 
 loadProfileData()
 
--- Ensure slots structure is initialized safely
+-- Ensure slots and names structure is initialized safely
 for i = 1, 5 do
-	if not SaveSlots[tostring(i)] then
-		SaveSlots[tostring(i)] = { Empty = true }
+	local slotKey = tostring(i)
+	if not SaveSlots[slotKey] then
+		SaveSlots[slotKey] = { Empty = true }
+	end
+	if not SlotNames[slotKey] then
+		SlotNames[slotKey] = "SLOT " .. slotKey
 	end
 end
 
@@ -296,7 +303,6 @@ local function localAttach(character, tierName, item)
 	local rootWeld = Instance.new("Weld")
 	rootWeld.Name = "AccessoryWeld"
 	
-	-- FIXED: Swapped parts to native alignment (Head -> Part0, Handle -> Part1)
 	rootWeld.Part0 = head
 	rootWeld.Part1 = handle
 	
@@ -534,7 +540,7 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 end)
 
 -- ====================================================================
--- SAVE SLOTS ENGINE PANEL (DIRECT WRITING EXECUTOR)
+-- SAVE SLOTS ENGINE PANEL (WITH CUSTOM RENAMING FUNCTION)
 -- ====================================================================
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
@@ -566,6 +572,7 @@ local function drawSaveSlotsInterface()
 		local slotKey = tostring(i)
 		local slotData = SaveSlots[slotKey]
 		local isEmpty = slotData.Empty == true
+		local slotDisplayName = SlotNames[slotKey] or ("SLOT " .. slotKey)
 		
 		local card = Instance.new("Frame")
 		card.Size = UDim2.new(0, 144, 0, 44)
@@ -577,16 +584,44 @@ local function drawSaveSlotsInterface()
 		cardCorner.CornerRadius = UDim.new(0, 4)
 		cardCorner.Parent = card
 		
+		-- Custom Text Field / Label Header
 		local statusLabel = Instance.new("TextLabel")
-		statusLabel.Size = UDim2.new(1, -10, 0, 16)
+		statusLabel.Size = UDim2.new(1, -30, 0, 16)
 		statusLabel.Position = UDim2.new(0, 6, 0, 2)
 		statusLabel.BackgroundTransparency = 1
 		statusLabel.Font = Enum.Font.GothamBold
-		statusLabel.Text = "SLOT " .. slotKey .. (isEmpty and " [EMPTY]" or " [SAVED]")
+		statusLabel.Text = slotDisplayName .. (isEmpty and " [EMPTY]" or "")
 		statusLabel.TextColor3 = isEmpty and Color3.fromRGB(130, 130, 140) or Color3.fromRGB(0, 255, 150)
 		statusLabel.TextSize = 9
 		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 		statusLabel.Parent = card
+		
+		-- Mini Rename Action Input Trigger Button
+		local renameBtn = Instance.new("TextBox")
+		renameBtn.Size = UDim2.new(0, 22, 0, 14)
+		renameBtn.Position = UDim2.new(1, -26, 0, 3)
+		renameBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+		renameBtn.Font = Enum.Font.GothamBold
+		renameBtn.Text = "✏️"
+		renameBtn.TextColor3 = Color3.fromRGB(200, 200, 205)
+		renameBtn.TextSize = 8
+		renameBtn.ClearTextOnFocus = true
+		renameBtn.Parent = card
+		
+		local rnCorner = Instance.new("UICorner")
+		rnCorner.CornerRadius = UDim.new(0, 3)
+		rnCorner.Parent = renameBtn
+		
+		renameBtn.FocusLost:Connect(function(enterPressed)
+			local filteredText = string.gsub(renameBtn.Text, "^%s*(.-)%s*$", "%1") -- trim spaces
+			if filteredText ~= "" and filteredText ~= "✏️" and filteredText ~= "Invalid!" then
+				SlotNames[slotKey] = string.sub(filteredText, 1, 16) -- Cap length to 16 chars
+			else
+				SlotNames[slotKey] = "SLOT " .. slotKey
+			end
+			saveProfileData()
+			drawSaveSlotsInterface()
+		end)
 		
 		local loadBtn = Instance.new("TextButton")
 		loadBtn.Size = UDim2.new(0, 62, 0, 18)
@@ -628,7 +663,7 @@ local function drawSaveSlotsInterface()
 			drawSaveSlotsInterface()
 			
 			for _, element in ipairs(SlotFramePanel:GetChildren()) do
-				if element:IsA("Frame") and element:FindFirstChild("SLOT " .. slotKey) then
+				if element:IsA("Frame") and element:FindFirstChild(slotDisplayName) then
 					local targetSave = element:FindFirstChild("SAVE") or element:FindFirstChildWhichIsA("TextButton")
 					if targetSave and targetSave.Position.X.Offset > 50 then
 						targetSave.Text = "SAVED!"
@@ -929,7 +964,6 @@ ExtractBtn.Activated:Connect(function()
 				local cloneCopy = child:Clone()
 				cloneCopy.Name = internalName
 				
-				-- Scrub old joints/attachments from extraction clone copies
 				for _, subItem in ipairs(cloneCopy:GetDescendants()) do
 					if subItem:IsA("Weld") or subItem:IsA("ManualWeld") or subItem:IsA("WeldConstraint") or subItem:IsA("Attachment") or subItem:IsA("RigidConstraint") then
 						subItem:Destroy()
@@ -943,7 +977,6 @@ ExtractBtn.Activated:Connect(function()
 				
 				initializeItemData(selectedTierName, cloneCopy)
 				
-				-- NATIVE EXTRACT MATH: Capture actual offset space directly from character Head
 				local relativeCFrame = head.CFrame:ToObjectSpace(handle.CFrame)
 				local offsetX, offsetY, offsetZ = relativeCFrame.X, relativeCFrame.Y, relativeCFrame.Z
 				local rX, rY, rZ = relativeCFrame:ToEulerAnglesXYZ()
@@ -1146,4 +1179,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded WRONG!!!!883ly.")
+print("Util.. ITS FINALLY OVER")
