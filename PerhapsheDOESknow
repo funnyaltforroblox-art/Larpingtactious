@@ -373,7 +373,7 @@ local function monitorHealth(character)
 	forceRecalculateHealthPreset(character)
 end
 
--- FIXED REHYDRATION ENGINE: Uses SpecialMesh override to bypass MeshPart asset write-restrictions
+-- REHYDRATION ENGINE: Uses SpecialMesh override to bypass MeshPart asset write-restrictions
 local function generateExtractedPlaceholderModel(tierName, itemName)
 	local folder = TargetPresetFolder:FindFirstChild(tierName)
 	if not folder or folder:FindFirstChild(itemName) then return end
@@ -474,7 +474,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = false
 MainFrame.Active = true
-MainFrame.Parent = ScreenGui -- FIXED: Parents strictly to ScreenGui to avoid self-parenting stack crashes
+MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 12)
@@ -837,7 +837,7 @@ local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
 
--- FIXED ADVANCED INJECTION LAYER
+-- ADVANCED INJECTION LAYER
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
@@ -1009,18 +1009,84 @@ createMatrixInput("Scale Z:",  "scaleZ",  18)
 -- ADVANCED EXTRACTION ENGINE
 -- ====================================================================
 local ExtractBtn = Instance.new("TextButton")
-ExtractBtn.Size = UDim2.new(1, 0, 0, 30)
+ExtractBtn.Size = UDim2.new(1, 0, 0, 26)
 ExtractBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 150)
 ExtractBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ExtractBtn.Text = "EXTRACT ACCESSORIES"
 ExtractBtn.Font = Enum.Font.GothamBold
-ExtractBtn.TextSize = 11
+ExtractBtn.TextSize = 10
 ExtractBtn.LayoutOrder = 50 
 ExtractBtn.Parent = EditorScroll
 
 local ExtractBtnCorner = Instance.new("UICorner")
 ExtractBtnCorner.CornerRadius = UDim.new(0, 4)
 ExtractBtnCorner.Parent = ExtractBtn
+
+-- ====================================================================
+-- DELETE ITEM ENGINE (ADDED)
+-- ====================================================================
+local DeleteItemBtn = Instance.new("TextButton")
+DeleteItemBtn.Size = UDim2.new(1, 0, 0, 26)
+DeleteItemBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+DeleteItemBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+DeleteItemBtn.Text = "DELETE ITEM"
+DeleteItemBtn.Font = Enum.Font.GothamBold
+DeleteItemBtn.TextSize = 10
+DeleteItemBtn.LayoutOrder = 51
+DeleteItemBtn.Parent = EditorScroll
+
+local DeleteBtnCorner = Instance.new("UICorner")
+DeleteBtnCorner.CornerRadius = UDim.new(0, 4)
+DeleteBtnCorner.Parent = DeleteItemBtn
+
+DeleteItemBtn.Activated:Connect(function()
+	if selectedItemName == "" then return end
+	
+	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
+	if targetFolder then
+		local itemObj = targetFolder:FindFirstChild(selectedItemName)
+		if itemObj then itemObj:Destroy() end
+	end
+	
+	-- Remove from offset tables
+	if CustomOffsets[selectedTierName] then
+		CustomOffsets[selectedTierName][selectedItemName] = nil
+	end
+	
+	-- Remove from Extracted Visuals
+	if ExtractedVisuals[selectedTierName] then
+		ExtractedVisuals[selectedTierName][selectedItemName] = nil
+	end
+	
+	-- Remove from Extracted Name Registry
+	if ExtractedNamesToLoad[selectedTierName] then
+		local idx = table.find(ExtractedNamesToLoad[selectedTierName], selectedItemName)
+		if idx then table.remove(ExtractedNamesToLoad[selectedTierName], idx) end
+	end
+	
+	-- Check and remove ID if it matches an Asset ID
+	if string.find(selectedItemName, "Asset_") then
+		local rawId = tonumber(string.match(selectedItemName, "%d+"))
+		if rawId and AssetIdsToLoad[selectedTierName] then
+			local idIdx = table.find(AssetIdsToLoad[selectedTierName], rawId)
+			if idIdx then table.remove(AssetIdsToLoad[selectedTierName], idIdx) end
+		end
+	end
+	
+	selectedItemName = ""
+	selectedSubPartName = "Handle"
+	clearActiveHighlight()
+	saveProfileData()
+	
+	updateItemUI()
+	updateEditorUI()
+	
+	if isPreviewingMode then
+		runUpdatePreviewCycle()
+	elseif LocalPlayer.Character then
+		applyPreset(LocalPlayer.Character, lastPreset)
+	end
+end)
 
 ExtractBtn.Activated:Connect(function()
 	local char = LocalPlayer.Character
@@ -1293,4 +1359,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded1042001.")
+print("Util Loaded1042.")
