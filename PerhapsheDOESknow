@@ -841,12 +841,13 @@ local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
 
--- SAFE INJECTION LAYER (CRASH FIX INCLUDED)
+-- SAFE INJECTION LAYER (FIXED LINE 882 TYPE GUARD)
 injectAssetId = function(id, tierName, isSilentRestore)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
 	
-	local strId = tostring(id or "")
+	if id == nil then return false end
+	local strId = tostring(id)
 	if strId == "" then return false end
 
 	local success, assetModel = pcall(function()
@@ -859,8 +860,8 @@ injectAssetId = function(id, tierName, isSilentRestore)
 				local match = false
 				for partName, visualData in pairs(parts) do
 					if type(visualData) == "table" and visualData.MeshId then
-						local meshStr = tostring(visualData.MeshId)
-						if string.find(meshStr, strId, 1, true) then
+						local meshStr = tostring(visualData.MeshId or "")
+						if meshStr ~= "" and string.find(meshStr, strId, 1, true) then
 							match = true
 							break
 						end
@@ -1349,7 +1350,9 @@ restoreAllTierAssets = function()
 		for tierName, idList in pairs(AssetIdsToLoad) do
 			if type(idList) == "table" then
 				for _, id in ipairs(idList) do
-					task.spawn(function() injectAssetId(id, tierName, true) end)
+					if id ~= nil then
+						task.spawn(function() injectAssetId(id, tierName, true) end)
+					end
 				end
 			end
 		end
@@ -1359,7 +1362,9 @@ restoreAllTierAssets = function()
 		for tierName, extractionList in pairs(ExtractedNamesToLoad) do
 			if type(extractionList) == "table" then
 				for _, name in ipairs(extractionList) do
-					generateExtractedPlaceholderModel(tierName, name)
+					if name ~= nil then
+						generateExtractedPlaceholderModel(tierName, name)
+					end
 				end
 			end
 		end
@@ -1383,4 +1388,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Engine Fix.")
+print("Util Loaded Ebutrealngine Fix.")
