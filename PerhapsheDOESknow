@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (With Safe Type Checks & Robust JSON Syncing)
+-- Health-Based Face & Model Customizer (With Explicit Type Verification)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -420,8 +420,8 @@ local function generateExtractedPlaceholderModel(tierName, itemName)
 			local sm = Instance.new("SpecialMesh")
 			sm.MeshType = Enum.MeshType.FileMesh
 			
-			local rawMesh = tostring(visualData.MeshId or "")
-			local rawTexture = tostring(visualData.TextureId or "")
+			local rawMesh = visualData.MeshId and tostring(visualData.MeshId) or ""
+			local rawTexture = visualData.TextureId and tostring(visualData.TextureId) or ""
 			
 			sm.MeshId = string.match(rawMesh, "^%d+$") and ("rbxassetid://" .. rawMesh) or rawMesh
 			sm.TextureId = string.match(rawTexture, "^%d+$") and ("rbxassetid://" .. rawTexture) or rawTexture
@@ -841,14 +841,15 @@ local InjectBtnCorner = Instance.new("UICorner")
 InjectBtnCorner.CornerRadius = UDim.new(0, 4)
 InjectBtnCorner.Parent = InjectBtn
 
--- SAFE INJECTION LAYER (FIXED LINE 882 TYPE GUARD)
+-- SAFE INJECTION LAYER (FIXED TYPE GUARDS FOR FIND)
 injectAssetId = function(id, tierName, isSilentRestore)
-	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
-	if not targetFolder then return false end
-	
 	if id == nil then return false end
 	local strId = tostring(id)
 	if strId == "" then return false end
+	
+	tierName = tostring(tierName or Config.SelectedDefault)
+	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
+	if not targetFolder then return false end
 
 	local success, assetModel = pcall(function()
 		return game:GetObjects("rbxassetid://" .. strId)[1]
@@ -859,11 +860,13 @@ injectAssetId = function(id, tierName, isSilentRestore)
 			if type(parts) == "table" then
 				local match = false
 				for partName, visualData in pairs(parts) do
-					if type(visualData) == "table" and visualData.MeshId then
-						local meshStr = tostring(visualData.MeshId or "")
-						if meshStr ~= "" and string.find(meshStr, strId, 1, true) then
-							match = true
-							break
+					if type(visualData) == "table" then
+						local meshStr = visualData.MeshId and tostring(visualData.MeshId) or ""
+						if meshStr ~= "" and type(meshStr) == "string" and type(strId) == "string" then
+							if string.find(meshStr, strId, 1, true) then
+								match = true
+								break
+							end
 						end
 					end
 				end
@@ -880,7 +883,7 @@ injectAssetId = function(id, tierName, isSilentRestore)
 	end
 	
 	if success and assetModel then
-		if not string.find(assetModel.Name, "Asset_") and not assetModel:IsA("Accessory") then
+		if type(assetModel.Name) == "string" and not string.find(assetModel.Name, "Asset_") and not assetModel:IsA("Accessory") then
 			assetModel.Name = "Asset_" .. strId
 		end
 		
@@ -1351,7 +1354,11 @@ restoreAllTierAssets = function()
 			if type(idList) == "table" then
 				for _, id in ipairs(idList) do
 					if id ~= nil then
-						task.spawn(function() injectAssetId(id, tierName, true) end)
+						local validId = id
+						local validTier = tierName
+						task.spawn(function()
+							injectAssetId(validId, validTier, true)
+						end)
 					end
 				end
 			end
@@ -1388,4 +1395,4 @@ Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
 
-print("Util Loaded Ebutrealngine Fix.")
+print("Util Loaded Ennothingisworkinggine Fix.")
