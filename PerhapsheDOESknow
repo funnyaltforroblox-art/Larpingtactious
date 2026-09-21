@@ -98,7 +98,6 @@ end
 loadProfileData()
 
 -- Ensure slots and names structure is initialized safely.
--- Existing saves keep their current slots; new slots can be added from the UI.
 local function getSaveSlotCount()
 	local maxSlot = 0
 
@@ -130,7 +129,7 @@ for i = 1, 5 do
 end
 
 -- ====================================================================
--- DIRECTORY SETUP LAYER
+-- DIRECTORY SETUP LAYER (FOLDER CREATION ENGINE)
 -- ====================================================================
 local TargetPresetFolder = ReplicatedStorage:FindFirstChild("FaceAccPresets")
 
@@ -164,11 +163,21 @@ local function ensureSubFolder(name)
 	if not ExtractedVisuals[name] then ExtractedVisuals[name] = {} end
 end
 
-ensureSubFolder(Config.SelectedDefault)
-ensureSubFolder(Config.SelectedMinor)
-ensureSubFolder(Config.SelectedMedium)
-ensureSubFolder(Config.SelectedMajor)
-ensureSubFolder(Config.SelectedCritical)
+local function ensureDirectoryStructure()
+	local requiredTiers = {
+		Config.SelectedDefault,
+		Config.SelectedMinor,
+		Config.SelectedMedium,
+		Config.SelectedMajor,
+		Config.SelectedCritical
+	}
+
+	for _, tier in ipairs(requiredTiers) do
+		ensureSubFolder(tier)
+	end
+end
+
+ensureDirectoryStructure()
 
 local function initializeItemData(tierName, item)
 	if not CustomOffsets[tierName] then
@@ -975,73 +984,54 @@ local function drawSaveSlotsInterface()
 		end)
 		
 		loadBtn.Activated:Connect(function()
+			if isEmpty then
+				loadBtn.Text = "EMPTY!"
+				task.wait(0.8)
+				loadBtn.Text = "LOAD"
+				return
+			end
+
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
 				folder:ClearAllChildren()
 			end
 
-			if isEmpty then
-				CustomOffsets = {}
-				AssetIdsToLoad = {}
-				ExtractedNamesToLoad = {}
-				ExtractedVisuals = {}
+			CustomOffsets = HttpService:JSONDecode(
+				HttpService:JSONEncode(slotData.Offsets)
+			)
 
-				local tiers = {
-					Config.SelectedDefault,
-					Config.SelectedMinor,
-					Config.SelectedMedium,
-					Config.SelectedMajor,
-					Config.SelectedCritical
-				}
+			AssetIdsToLoad = HttpService:JSONDecode(
+				HttpService:JSONEncode(slotData.AssetIds or {})
+			)
 
-				for _, tName in ipairs(tiers) do
-					CustomOffsets[tName] = {}
-					AssetIdsToLoad[tName] = {}
-					ExtractedNamesToLoad[tName] = {}
-					ExtractedVisuals[tName] = {}
+			ExtractedNamesToLoad = HttpService:JSONDecode(
+				HttpService:JSONEncode(slotData.ExtractedNames or {})
+			)
+
+			ExtractedVisuals = HttpService:JSONDecode(
+				HttpService:JSONEncode(slotData.ExtractedVisuals or {})
+			)
+			
+			local totalLoads = 0
+			
+			for tierName, idList in pairs(AssetIdsToLoad) do
+				for _, id in ipairs(idList) do
+					totalLoads = totalLoads + 1
+
+					task.spawn(function()
+						injectAssetId(id, tierName, true)
+					end)
 				end
-
-				selectedItemName = ""
-				selectedSubPartName = "Handle"
-				clearActiveItems()
-			else
-				CustomOffsets = HttpService:JSONDecode(
-					HttpService:JSONEncode(slotData.Offsets)
-				)
-
-				AssetIdsToLoad = HttpService:JSONDecode(
-					HttpService:JSONEncode(slotData.AssetIds or {})
-				)
-
-				ExtractedNamesToLoad = HttpService:JSONDecode(
-					HttpService:JSONEncode(slotData.ExtractedNames or {})
-				)
-
-				ExtractedVisuals = HttpService:JSONDecode(
-					HttpService:JSONEncode(slotData.ExtractedVisuals or {})
-				)
-				
-				local totalLoads = 0
-				
-				for tierName, idList in pairs(AssetIdsToLoad) do
-					for _, id in ipairs(idList) do
-						totalLoads = totalLoads + 1
-
-						task.spawn(function()
-							injectAssetId(id, tierName, true)
-						end)
-					end
+			end
+			
+			for tierName, extractionList in pairs(ExtractedNamesToLoad) do
+				for _, name in ipairs(extractionList) do
+					totalLoads = totalLoads + 1
+					generateExtractedPlaceholderModel(tierName, name)
 				end
-				
-				for tierName, extractionList in pairs(ExtractedNamesToLoad) do
-					for _, name in ipairs(extractionList) do
-						totalLoads = totalLoads + 1
-						generateExtractedPlaceholderModel(tierName, name)
-					end
-				end
-				
-				if totalLoads > 0 then
-					task.wait(0.35)
-				end
+			end
+			
+			if totalLoads > 0 then
+				task.wait(0.35)
 			end
 			
 			if isPreviewingMode then
@@ -1843,4 +1833,4 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 end)
 
-print("Util Loaded1l193932.")
+print("Util Loadezmaiaii38e8zbd1l193932.")
