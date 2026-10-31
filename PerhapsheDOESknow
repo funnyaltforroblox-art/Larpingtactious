@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (Robust Memory & JSON Fix)
+-- Health-Based Face & Model Customizer (Robust Memory & JSON Fix + Exact Color/Texture Copy)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -402,8 +402,21 @@ local function generateExtractedPlaceholderModel(tierName, itemName)
 		if type(visualData) == "table" then
 			local part = Instance.new("Part")
 			part.Name = partName
-			part.Transparency = 0
-			part.Material = Enum.Material.Plastic
+			part.Transparency = visualData.Transparency or 0
+			part.Reflectance = visualData.Reflectance or 0
+			
+			local mat = visualData.Material
+			if type(mat) == "string" then
+				mat = string.gsub(mat, "^Enum%.Material%.", "")
+				part.Material = Enum.Material[mat] or Enum.Material.Plastic
+			else
+				part.Material = Enum.Material.Plastic
+			end
+			
+			if visualData.ColorR and visualData.ColorG and visualData.ColorB then
+				part.Color = Color3.new(visualData.ColorR, visualData.ColorG, visualData.ColorB)
+			end
+			
 			part.Size = Vector3.new(visualData.SizeX or 1, visualData.SizeY or 1, visualData.SizeZ or 1)
 			
 			local sm = Instance.new("SpecialMesh")
@@ -1129,12 +1142,21 @@ ExtractBtn.Activated:Connect(function()
 				for _, part in ipairs(cloneCopy:GetDescendants()) do
 					if part:IsA("BasePart") then
 						local pMesh = part:FindFirstChildWhichIsA("SpecialMesh")
+						local meshId = pMesh and pMesh.MeshId or (part:IsA("MeshPart") and part.MeshId or "")
+						local textureId = pMesh and pMesh.TextureId or (part:IsA("MeshPart") and part.TextureID or "")
+						
 						ExtractedVisuals[selectedTierName][internalName][part.Name] = {
-							MeshId = pMesh and pMesh.MeshId or "",
-							TextureId = pMesh and pMesh.TextureId or "",
+							MeshId = meshId,
+							TextureId = textureId,
 							SizeX = part.Size.X,
 							SizeY = part.Size.Y,
-							SizeZ = part.Size.Z
+							SizeZ = part.Size.Z,
+							ColorR = part.Color.R,
+							ColorG = part.Color.G,
+							ColorB = part.Color.B,
+							Material = tostring(part.Material),
+							Transparency = part.Transparency,
+							Reflectance = part.Reflectance
 						}
 					end
 				end
