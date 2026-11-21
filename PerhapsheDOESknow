@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (Robust Memory & JSON Fix + Exact Color/Texture Copy)
+-- Health-Based Face & Model Customizer (Robust Memory & JSON Fix + Exact Color/Texture Copy + Slot Thresholds & Custom Categories + "nil" HP Disable)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -19,15 +19,92 @@ local Config = {
 	SelectedCritical = "CriticalDamage" 
 }
 
+local DEFAULT_THRESHOLDS = {
+	[Config.SelectedMinor]    = 0.75,
+	[Config.SelectedMedium]   = 0.50,
+	[Config.SelectedMajor]    = 0.30,
+	[Config.SelectedCritical] = 0.15
+}
+
+local function cloneTable(tbl)
+	if type(tbl) ~= "table" then return {} end
+	local ok, encoded = pcall(function()
+		return HttpService:JSONEncode(tbl)
+	end)
+	if ok and encoded then
+		local okDec, decoded = pcall(function()
+			return HttpService:JSONDecode(encoded)
+		end)
+		if okDec and type(decoded) == "table" then
+			return decoded
+		end
+	end
+	return {}
+end
+
+local function isNilThreshold(val)
+	if val == nil then return true end
+	if type(val) == "string" then
+		local trimmed = string.lower(string.gsub(val, "^%s*(.-)%s*$", "%1"))
+		if trimmed == "nil" or trimmed == "none" or trimmed == "" then
+			return true
+		end
+	end
+	return false
+end
+
+-- Returns either a clamped number in [0, 1] or the literal string "nil"
+local function normalizeThreshold(val, fallback)
+	if isNilThreshold(val) then
+		return "nil"
+	end
+	local num = tonumber(val)
+	if not num then
+		if isNilThreshold(fallback) then
+			return "nil"
+		end
+		local fbNum = tonumber(fallback) or 0.5
+		if fbNum > 1 then fbNum = fbNum / 100 end
+		return math.clamp(fbNum, 0, 1)
+	end
+	if num > 1 then
+		num = num / 100
+	end
+	return math.clamp(num, 0, 1)
+end
+
+local function formatThresholdText(val)
+	if isNilThreshold(val) then
+		return "nil"
+	end
+	local num = tonumber(val)
+	if not num then return "nil" end
+	return string.format("%.2f", math.clamp(num, 0, 1))
+end
+
+local function getDefaultThresholdsCopy()
+	return {
+		[Config.SelectedMinor]    = DEFAULT_THRESHOLDS[Config.SelectedMinor],
+		[Config.SelectedMedium]   = DEFAULT_THRESHOLDS[Config.SelectedMedium],
+		[Config.SelectedMajor]    = DEFAULT_THRESHOLDS[Config.SelectedMajor],
+		[Config.SelectedCritical] = DEFAULT_THRESHOLDS[Config.SelectedCritical]
+	}
+end
+
 local CustomOffsets = {}
 local AssetIdsToLoad = {} 
 local ExtractedNamesToLoad = {}
 local ExtractedVisuals = {}     
 local SaveSlots = {}
 local SlotNames = {}
+local ActiveThresholds = getDefaultThresholdsCopy()
+local ActiveCustomCategories = {} -- Array of { Name = string, MaxRatio = number (0..1) | "nil" }
+local activeSlotKey = nil
+
 local lastPreset = ""
 local activeClientInstances = {}
 local isPreviewingMode = false 
+local isThresholdEditorOpen = false
 
 local selectedTierName = Config.SelectedDefault
 local selectedItemName = ""
@@ -48,7 +125,17 @@ local function safeTableFind(tbl, target)
 	return nil
 end
 
+local function syncActiveSlotData()
+	if not activeSlotKey then return end
+	local slot = SaveSlots[activeSlotKey]
+	if type(slot) == "table" and not slot.Empty then
+		slot.Thresholds = cloneTable(ActiveThresholds)
+		slot.CustomCategories = cloneTable(ActiveCustomCategories)
+	end
+end
+
 local function saveProfileData()
+	syncActiveSlotData()
 	pcall(function()
 		if writefile then
 			local package = {
@@ -56,6 +143,8 @@ local function saveProfileData()
 				AssetIds = AssetIdsToLoad,
 				ExtractedNames = ExtractedNamesToLoad,
 				ExtractedVisuals = ExtractedVisuals,
+				Thresholds = ActiveThresholds,
+				CustomCategories = ActiveCustomCategories,
 				Slots = SaveSlots,
 				SlotNames = SlotNames
 			}
@@ -84,6 +173,26 @@ local function loadProfileData()
 			ExtractedVisuals = type(parsedData.ExtractedVisuals) == "table" and parsedData.ExtractedVisuals or {}
 			SaveSlots = type(parsedData.Slots) == "table" and parsedData.Slots or {}
 			SlotNames = type(parsedData.SlotNames) == "table" and parsedData.SlotNames or {}
+
+			ActiveThresholds = getDefaultThresholdsCopy()
+			if type(parsedData.Thresholds) == "table" then
+				for k, v in pairs(parsedData.Thresholds) do
+					local keyStr = tostring(k)
+					ActiveThresholds[keyStr] = normalizeThreshold(v, ActiveThresholds[keyStr] or 0.5)
+				end
+			end
+
+			ActiveCustomCategories = {}
+			if type(parsedData.CustomCategories) == "table" then
+				for _, cat in ipairs(parsedData.CustomCategories) do
+					if type(cat) == "table" and type(cat.Name) == "string" and cat.Name ~= "" then
+						table.insert(ActiveCustomCategories, {
+							Name = cat.Name,
+							MaxRatio = normalizeThreshold(cat.MaxRatio, 0.5)
+						})
+					end
+				end
+			end
 			return
 		end
 	end
@@ -105,10 +214,30 @@ end
 local function ensureSaveSlot(slotNumber)
 	local slotKey = tostring(slotNumber)
 	if SaveSlots[slotKey] == nil and SaveSlots[slotNumber] == nil then
-		SaveSlots[slotKey] = { Empty = true }
+		SaveSlots[slotKey] = {
+			Empty = true,
+			Thresholds = getDefaultThresholdsCopy(),
+			CustomCategories = {}
+		}
+	elseif SaveSlots[slotNumber] ~= nil and SaveSlots[slotKey] == nil then
+		SaveSlots[slotKey] = SaveSlots[slotNumber]
+		SaveSlots[slotNumber] = nil
 	end
+
+	if type(SaveSlots[slotKey]) == "table" then
+		if type(SaveSlots[slotKey].Thresholds) ~= "table" then
+			SaveSlots[slotKey].Thresholds = getDefaultThresholdsCopy()
+		end
+		if type(SaveSlots[slotKey].CustomCategories) ~= "table" then
+			SaveSlots[slotKey].CustomCategories = {}
+		end
+	end
+
 	if SlotNames[slotKey] == nil and SlotNames[slotNumber] == nil then
 		SlotNames[slotKey] = "SLOT " .. slotKey
+	elseif SlotNames[slotNumber] ~= nil and SlotNames[slotKey] == nil then
+		SlotNames[slotKey] = SlotNames[slotNumber]
+		SlotNames[slotNumber] = nil
 	end
 end
 
@@ -122,6 +251,7 @@ if not TargetPresetFolder then
 end
 
 local function ensureSubFolder(name)
+	if type(name) ~= "string" or name == "" then return end
 	if not TargetPresetFolder:FindFirstChild(name) then
 		local subFolder = Instance.new("Folder")
 		subFolder.Name = name
@@ -134,12 +264,29 @@ local function ensureSubFolder(name)
 	if not ExtractedVisuals[name] or type(ExtractedVisuals[name]) ~= "table" then ExtractedVisuals[name] = {} end
 end
 
-local function ensureDirectoryStructure()
-	local requiredTiers = {
-		Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium,
-		Config.SelectedMajor, Config.SelectedCritical
+local function getAllTierNames()
+	local list = {
+		Config.SelectedDefault,
+		Config.SelectedMinor,
+		Config.SelectedMedium,
+		Config.SelectedMajor,
+		Config.SelectedCritical
 	}
-	for _, tier in ipairs(requiredTiers) do
+	local seen = {}
+	for _, n in ipairs(list) do
+		seen[n] = true
+	end
+	for _, cat in ipairs(ActiveCustomCategories) do
+		if type(cat) == "table" and type(cat.Name) == "string" and cat.Name ~= "" and not seen[cat.Name] then
+			seen[cat.Name] = true
+			table.insert(list, cat.Name)
+		end
+	end
+	return list
+end
+
+local function ensureDirectoryStructure()
+	for _, tier in ipairs(getAllTierNames()) do
 		ensureSubFolder(tier)
 	end
 end
@@ -360,18 +507,48 @@ local function applyPreset(character, folderName)
 	task.defer(highlightSelectedSubPart)
 end
 
+local function resolveHealthPreset(ratio)
+	local target = Config.SelectedDefault
+	local matchedThreshold = math.huge
+
+	-- Check default damage thresholds (skip any set to "nil")
+	for tierName, thresholdVal in pairs(ActiveThresholds) do
+		if tierName ~= Config.SelectedDefault and not isNilThreshold(thresholdVal) then
+			local maxR = tonumber(thresholdVal)
+			if maxR then
+				maxR = math.clamp(maxR > 1 and (maxR / 100) or maxR, 0, 1)
+				if ratio <= maxR and maxR < matchedThreshold then
+					matchedThreshold = maxR
+					target = tierName
+				end
+			end
+		end
+	end
+
+	-- Check slot-specific custom categories (skip any set to "nil")
+	for _, cat in ipairs(ActiveCustomCategories) do
+		if type(cat) == "table" and type(cat.Name) == "string" and cat.Name ~= "" and not isNilThreshold(cat.MaxRatio) then
+			local maxR = tonumber(cat.MaxRatio)
+			if maxR then
+				maxR = math.clamp(maxR > 1 and (maxR / 100) or maxR, 0, 1)
+				if ratio <= maxR and maxR < matchedThreshold then
+					matchedThreshold = maxR
+					target = cat.Name
+				end
+			end
+		end
+	end
+
+	return target
+end
+
 local function forceRecalculateHealthPreset(character)
 	if isPreviewingMode then return end
 	local humanoid = character:FindFirstChild("Humanoid")
-	if not humanoid then return end
+	if not humanoid or humanoid.MaxHealth <= 0 then return end
 	
 	local ratio = humanoid.Health / humanoid.MaxHealth
-	local target = Config.SelectedDefault
-	
-	if ratio <= 0.15 then target = Config.SelectedCritical
-	elseif ratio <= 0.30 then target = Config.SelectedMajor
-	elseif ratio <= 0.50 then target = Config.SelectedMedium
-	elseif ratio <= 0.75 then target = Config.SelectedMinor end
+	local target = resolveHealthPreset(ratio)
 	
 	lastPreset = target
 	applyPreset(character, target)
@@ -521,15 +698,29 @@ ToggleButton.Activated:Connect(function()
 end)
 
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, -250, 0, 35)
+TitleLabel.Size = UDim2.new(1, -260, 0, 35)
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.Text = "MODEL CONFIGURATION & AUTOMATIC PERSISTENCE PANEL"
+TitleLabel.Text = "MODEL CONFIGURATION & SLOT THRESHOLDS PANEL"
 TitleLabel.TextColor3 = Color3.fromRGB(240, 240, 245)
 TitleLabel.TextSize = 11
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 TitleLabel.Position = UDim2.new(0, 15, 0, 0)
 TitleLabel.Parent = MainFrame
+
+local ThresholdsModeBtn = Instance.new("TextButton")
+ThresholdsModeBtn.Size = UDim2.new(0, 115, 0, 24)
+ThresholdsModeBtn.Position = UDim2.new(1, -235, 0, 6)
+ThresholdsModeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+ThresholdsModeBtn.Font = Enum.Font.GothamBold
+ThresholdsModeBtn.Text = "THRESHOLDS: OFF"
+ThresholdsModeBtn.TextColor3 = Color3.fromRGB(180, 210, 255)
+ThresholdsModeBtn.TextSize = 9
+ThresholdsModeBtn.Parent = MainFrame
+
+local ThreshBtnCorner = Instance.new("UICorner")
+ThreshBtnCorner.CornerRadius = UDim.new(0, 4)
+ThreshBtnCorner.Parent = ThresholdsModeBtn
 
 local PreviewToggleBtn = Instance.new("TextButton")
 PreviewToggleBtn.Size = UDim2.new(0, 100, 0, 24)
@@ -602,6 +793,29 @@ EditorListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(functio
 	EditorScroll.CanvasSize = UDim2.new(0, 0, 0, EditorListLayout.AbsoluteContentSize.Y + 25)
 end)
 
+local ThresholdEditorScroll = Instance.new("ScrollingFrame")
+ThresholdEditorScroll.Name = "ThresholdEditorScroll"
+ThresholdEditorScroll.Size = UDim2.new(0, 165, 1, -100)
+ThresholdEditorScroll.Position = UDim2.new(0, 265, 0, 40)
+ThresholdEditorScroll.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+ThresholdEditorScroll.BorderSizePixel = 0
+ThresholdEditorScroll.ScrollBarThickness = 3
+ThresholdEditorScroll.Visible = false
+ThresholdEditorScroll.Parent = MainFrame
+
+local ThresholdCorner = Instance.new("UICorner")
+ThresholdCorner.CornerRadius = UDim.new(0, 6)
+ThresholdCorner.Parent = ThresholdEditorScroll
+
+local ThresholdLayout = Instance.new("UIListLayout")
+ThresholdLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ThresholdLayout.Padding = UDim.new(0, 5)
+ThresholdLayout.Parent = ThresholdEditorScroll
+
+ThresholdLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	ThresholdEditorScroll.CanvasSize = UDim2.new(0, 0, 0, ThresholdLayout.AbsoluteContentSize.Y + 20)
+end)
+
 local SlotFramePanel = Instance.new("ScrollingFrame")
 SlotFramePanel.Name = "SlotFramePanel"
 SlotFramePanel.Size = UDim2.new(0, 160, 0, 215)
@@ -621,7 +835,24 @@ SlotListLayout.Padding = UDim.new(0, 6)
 SlotListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 SlotListLayout.Parent = SlotFramePanel
 
-local updateTierUI, updateItemUI, updateEditorUI, restoreAllTierAssets
+local updateTierUI, updateItemUI, updateEditorUI, updateThresholdEditorUI, restoreAllTierAssets
+
+ThresholdsModeBtn.Activated:Connect(function()
+	isThresholdEditorOpen = not isThresholdEditorOpen
+	EditorScroll.Visible = not isThresholdEditorOpen
+	ThresholdEditorScroll.Visible = isThresholdEditorOpen
+
+	if isThresholdEditorOpen then
+		ThresholdsModeBtn.Text = "THRESHOLDS: ON"
+		ThresholdsModeBtn.BackgroundColor3 = Color3.fromRGB(45, 95, 150)
+		ThresholdsModeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		updateThresholdEditorUI()
+	else
+		ThresholdsModeBtn.Text = "THRESHOLDS: OFF"
+		ThresholdsModeBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+		ThresholdsModeBtn.TextColor3 = Color3.fromRGB(180, 210, 255)
+	end
+end)
 
 local function drawSaveSlotsInterface()
 	for _, child in ipairs(SlotFramePanel:GetChildren()) do
@@ -637,11 +868,12 @@ local function drawSaveSlotsInterface()
 		local slotKey = tostring(i)
 		local slotData = SaveSlots[slotKey] or SaveSlots[i]
 		local isEmpty = not slotData or slotData.Empty == true
+		local isActive = (activeSlotKey == slotKey)
 		local slotDisplayName = SlotNames[slotKey] or SlotNames[i] or ("SLOT " .. slotKey)
 		
 		local card = Instance.new("Frame")
 		card.Size = UDim2.new(0, 144, 0, 44)
-		card.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+		card.BackgroundColor3 = isActive and Color3.fromRGB(36, 48, 44) or Color3.fromRGB(30, 30, 38)
 		card.BorderSizePixel = 0
 		card.LayoutOrder = i
 		card.Parent = SlotFramePanel
@@ -655,7 +887,7 @@ local function drawSaveSlotsInterface()
 		statusLabel.Position = UDim2.new(0, 6, 0, 2)
 		statusLabel.BackgroundTransparency = 1
 		statusLabel.Font = Enum.Font.GothamBold
-		statusLabel.Text = slotDisplayName .. (isEmpty and " [EMPTY]" or "")
+		statusLabel.Text = slotDisplayName .. (isActive and " [ACTIVE]" or (isEmpty and " [EMPTY]" or ""))
 		statusLabel.TextColor3 = isEmpty and Color3.fromRGB(130, 130, 140) or Color3.fromRGB(0, 255, 150)
 		statusLabel.TextSize = 9
 		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -716,12 +948,15 @@ local function drawSaveSlotsInterface()
 		sCc.Parent = saveBtn
 		
 		saveBtn.Activated:Connect(function()
+			activeSlotKey = slotKey
 			SaveSlots[slotKey] = {
 				Empty = false,
-				Offsets = HttpService:JSONDecode(HttpService:JSONEncode(CustomOffsets)),
-				AssetIds = HttpService:JSONDecode(HttpService:JSONEncode(AssetIdsToLoad)),
-				ExtractedNames = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedNamesToLoad)),
-				ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(ExtractedVisuals))
+				Offsets = cloneTable(CustomOffsets),
+				AssetIds = cloneTable(AssetIdsToLoad),
+				ExtractedNames = cloneTable(ExtractedNamesToLoad),
+				ExtractedVisuals = cloneTable(ExtractedVisuals),
+				Thresholds = cloneTable(ActiveThresholds),
+				CustomCategories = cloneTable(ActiveCustomCategories)
 			}
 			saveProfileData()
 			drawSaveSlotsInterface()
@@ -742,19 +977,56 @@ local function drawSaveSlotsInterface()
 				return
 			end
 
+			activeSlotKey = slotKey
+
 			for _, folder in ipairs(TargetPresetFolder:GetChildren()) do
 				if typeof(folder) == "Instance" then
 					folder:ClearAllChildren()
 				end
 			end
 
-			CustomOffsets = HttpService:JSONDecode(HttpService:JSONEncode(slotData.Offsets or {}))
-			AssetIdsToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.AssetIds or {}))
-			ExtractedNamesToLoad = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedNames or {}))
-			ExtractedVisuals = HttpService:JSONDecode(HttpService:JSONEncode(slotData.ExtractedVisuals or {}))
+			CustomOffsets = cloneTable(slotData.Offsets or {})
+			AssetIdsToLoad = cloneTable(slotData.AssetIds or {})
+			ExtractedNamesToLoad = cloneTable(slotData.ExtractedNames or {})
+			ExtractedVisuals = cloneTable(slotData.ExtractedVisuals or {})
+
+			ActiveThresholds = getDefaultThresholdsCopy()
+			if type(slotData.Thresholds) == "table" then
+				for k, v in pairs(slotData.Thresholds) do
+					local keyStr = tostring(k)
+					ActiveThresholds[keyStr] = normalizeThreshold(v, ActiveThresholds[keyStr] or 0.5)
+				end
+			end
+
+			ActiveCustomCategories = {}
+			if type(slotData.CustomCategories) == "table" then
+				for _, cat in ipairs(slotData.CustomCategories) do
+					if type(cat) == "table" and type(cat.Name) == "string" and cat.Name ~= "" then
+						table.insert(ActiveCustomCategories, {
+							Name = cat.Name,
+							MaxRatio = normalizeThreshold(cat.MaxRatio, 0.5)
+						})
+					end
+				end
+			end
+
+			local validTiers = getAllTierNames()
+			local isSelectedTierValid = false
+			for _, tName in ipairs(validTiers) do
+				if tName == selectedTierName then
+					isSelectedTierValid = true
+					break
+				end
+			end
+			if not isSelectedTierValid then
+				selectedTierName = Config.SelectedDefault
+				selectedItemName = ""
+				selectedSubPartName = "Handle"
+			end
 			
 			ensureDirectoryStructure()
 			restoreAllTierAssets()
+			drawSaveSlotsInterface()
 			
 			if isPreviewingMode then
 				runUpdatePreviewCycle()
@@ -766,6 +1038,7 @@ local function drawSaveSlotsInterface()
 			updateTierUI()
 			updateItemUI()
 			updateEditorUI()
+			updateThresholdEditorUI()
 			
 			loadBtn.Text = "LOADED!"
 			task.wait(0.8)
@@ -797,6 +1070,351 @@ local function drawSaveSlotsInterface()
 	end)
 
 	SlotFramePanel.CanvasSize = UDim2.new(0, 0, 0, (slotCount * 50) + 42)
+end
+
+updateThresholdEditorUI = function()
+	for _, child in ipairs(ThresholdEditorScroll:GetChildren()) do
+		if not child:IsA("UIListLayout") and not child:IsA("UICorner") then
+			child:Destroy()
+		end
+	end
+
+	local orderCounter = 1
+	local function nextOrder()
+		local o = orderCounter
+		orderCounter = orderCounter + 1
+		return o
+	end
+
+	local slotScopeLabel = Instance.new("TextLabel")
+	slotScopeLabel.Size = UDim2.new(1, -8, 0, 20)
+	slotScopeLabel.BackgroundTransparency = 1
+	slotScopeLabel.Font = Enum.Font.GothamBold
+	slotScopeLabel.Text = activeSlotKey and ("SLOT " .. activeSlotKey .. " (0-1 or 'nil')") or "THRESHOLDS (0-1 or 'nil')"
+	slotScopeLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+	slotScopeLabel.TextSize = 9
+	slotScopeLabel.TextXAlignment = Enum.TextXAlignment.Left
+	slotScopeLabel.LayoutOrder = nextOrder()
+	slotScopeLabel.Parent = ThresholdEditorScroll
+
+	local defaultDamageTiers = {
+		Config.SelectedMinor,
+		Config.SelectedMedium,
+		Config.SelectedMajor,
+		Config.SelectedCritical
+	}
+
+	for _, tierName in ipairs(defaultDamageTiers) do
+		ensureSubFolder(tierName)
+		local currentVal = ActiveThresholds[tierName]
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, -8, 0, 22)
+		row.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+		row.BorderSizePixel = 0
+		row.LayoutOrder = nextOrder()
+		row.Parent = ThresholdEditorScroll
+
+		local rCorner = Instance.new("UICorner")
+		rCorner.CornerRadius = UDim.new(0, 4)
+		rCorner.Parent = row
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(0.62, -4, 1, 0)
+		lbl.Position = UDim2.new(0, 4, 0, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamSemibold
+		lbl.Text = tierName
+		lbl.TextColor3 = isNilThreshold(currentVal) and Color3.fromRGB(135, 135, 150) or Color3.fromRGB(220, 220, 230)
+		lbl.TextSize = 9
+		lbl.TextTruncate = Enum.TextTruncate.AtEnd
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = row
+
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(0.36, 0, 0, 18)
+		box.Position = UDim2.new(0.62, 0, 0, 2)
+		box.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+		box.BorderSizePixel = 0
+		box.Font = Enum.Font.GothamBold
+		box.Text = formatThresholdText(currentVal)
+		box.TextColor3 = isNilThreshold(currentVal) and Color3.fromRGB(255, 130, 130) or Color3.fromRGB(255, 220, 120)
+		box.TextSize = 9
+		box.ClearTextOnFocus = false
+		box.Parent = row
+
+		local bCorner = Instance.new("UICorner")
+		bCorner.CornerRadius = UDim.new(0, 3)
+		bCorner.Parent = box
+
+		box.FocusLost:Connect(function()
+			local raw = box.Text
+			if isNilThreshold(raw) then
+				ActiveThresholds[tierName] = "nil"
+				box.Text = "nil"
+				box.TextColor3 = Color3.fromRGB(255, 130, 130)
+				lbl.TextColor3 = Color3.fromRGB(135, 135, 150)
+				saveProfileData()
+				if not isPreviewingMode and LocalPlayer.Character then
+					lastPreset = ""
+					forceRecalculateHealthPreset(LocalPlayer.Character)
+				end
+				return
+			end
+
+			local parsed = tonumber(raw)
+			if parsed then
+				local clamped = normalizeThreshold(parsed, ActiveThresholds[tierName] or 0.5)
+				ActiveThresholds[tierName] = clamped
+				box.Text = formatThresholdText(clamped)
+				box.TextColor3 = Color3.fromRGB(255, 220, 120)
+				lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+				saveProfileData()
+				if not isPreviewingMode and LocalPlayer.Character then
+					lastPreset = ""
+					forceRecalculateHealthPreset(LocalPlayer.Character)
+				end
+			else
+				box.Text = formatThresholdText(ActiveThresholds[tierName])
+			end
+		end)
+	end
+
+	local customHeader = Instance.new("TextLabel")
+	customHeader.Size = UDim2.new(1, -8, 0, 18)
+	customHeader.BackgroundTransparency = 1
+	customHeader.Font = Enum.Font.GothamBold
+	customHeader.Text = "SLOT CUSTOM CATEGORIES"
+	customHeader.TextColor3 = Color3.fromRGB(130, 200, 255)
+	customHeader.TextSize = 9
+	customHeader.TextXAlignment = Enum.TextXAlignment.Left
+	customHeader.LayoutOrder = nextOrder()
+	customHeader.Parent = ThresholdEditorScroll
+
+	local newNameBox = Instance.new("TextBox")
+	newNameBox.Size = UDim2.new(1, -8, 0, 20)
+	newNameBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	newNameBox.BorderSizePixel = 0
+	newNameBox.Font = Enum.Font.Gotham
+	newNameBox.PlaceholderText = "New category name..."
+	newNameBox.Text = ""
+	newNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	newNameBox.TextSize = 9
+	newNameBox.ClearTextOnFocus = true
+	newNameBox.LayoutOrder = nextOrder()
+	newNameBox.Parent = ThresholdEditorScroll
+
+	local nnCorner = Instance.new("UICorner")
+	nnCorner.CornerRadius = UDim.new(0, 3)
+	nnCorner.Parent = newNameBox
+
+	local newThreshBox = Instance.new("TextBox")
+	newThreshBox.Size = UDim2.new(1, -8, 0, 20)
+	newThreshBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+	newThreshBox.BorderSizePixel = 0
+	newThreshBox.Font = Enum.Font.Gotham
+	newThreshBox.PlaceholderText = "Threshold (0-1 or 'nil')"
+	newThreshBox.Text = "0.40"
+	newThreshBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	newThreshBox.TextSize = 9
+	newThreshBox.ClearTextOnFocus = false
+	newThreshBox.LayoutOrder = nextOrder()
+	newThreshBox.Parent = ThresholdEditorScroll
+
+	local ntCorner = Instance.new("UICorner")
+	ntCorner.CornerRadius = UDim.new(0, 3)
+	ntCorner.Parent = newThreshBox
+
+	local addCatBtn = Instance.new("TextButton")
+	addCatBtn.Size = UDim2.new(1, -8, 0, 22)
+	addCatBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 85)
+	addCatBtn.BorderSizePixel = 0
+	addCatBtn.Font = Enum.Font.GothamBold
+	addCatBtn.Text = "+ ADD SLOT CATEGORY"
+	addCatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	addCatBtn.TextSize = 9
+	addCatBtn.LayoutOrder = nextOrder()
+	addCatBtn.Parent = ThresholdEditorScroll
+
+	local acCorner = Instance.new("UICorner")
+	acCorner.CornerRadius = UDim.new(0, 3)
+	acCorner.Parent = addCatBtn
+
+	addCatBtn.Activated:Connect(function()
+		local cleanName = string.gsub(newNameBox.Text or "", "^%s*(.-)%s*$", "%1")
+		if cleanName == "" then
+			newNameBox.Text = ""
+			newNameBox.PlaceholderText = "Enter name first!"
+			return
+		end
+
+		local rawThresh = newThreshBox.Text
+		local finalThresh
+		if isNilThreshold(rawThresh) then
+			finalThresh = "nil"
+		else
+			local parsedThresh = tonumber(rawThresh)
+			if not parsedThresh then
+				newThreshBox.Text = "0.40"
+				return
+			end
+			finalThresh = normalizeThreshold(parsedThresh, 0.40)
+		end
+
+		local exists = false
+		for _, cat in ipairs(ActiveCustomCategories) do
+			if string.lower(cat.Name) == string.lower(cleanName) then
+				cat.MaxRatio = finalThresh
+				exists = true
+				break
+			end
+		end
+
+		if not exists then
+			table.insert(ActiveCustomCategories, {
+				Name = cleanName,
+				MaxRatio = finalThresh
+			})
+		end
+
+		ensureSubFolder(cleanName)
+		selectedTierName = cleanName
+		selectedItemName = ""
+		selectedSubPartName = "Handle"
+
+		saveProfileData()
+		drawSaveSlotsInterface()
+		updateTierUI()
+		updateItemUI()
+		updateEditorUI()
+		updateThresholdEditorUI()
+
+		if not isPreviewingMode and LocalPlayer.Character then
+			lastPreset = ""
+			forceRecalculateHealthPreset(LocalPlayer.Character)
+		end
+	end)
+
+	for idx, cat in ipairs(ActiveCustomCategories) do
+		local isCatNil = isNilThreshold(cat.MaxRatio)
+		local cRow = Instance.new("Frame")
+		cRow.Size = UDim2.new(1, -8, 0, 22)
+		cRow.BackgroundColor3 = Color3.fromRGB(28, 34, 44)
+		cRow.BorderSizePixel = 0
+		cRow.LayoutOrder = nextOrder()
+		cRow.Parent = ThresholdEditorScroll
+
+		local crCorner = Instance.new("UICorner")
+		crCorner.CornerRadius = UDim.new(0, 4)
+		crCorner.Parent = cRow
+
+		local cName = Instance.new("TextLabel")
+		cName.Size = UDim2.new(0.52, -2, 1, 0)
+		cName.Position = UDim2.new(0, 4, 0, 0)
+		cName.BackgroundTransparency = 1
+		cName.Font = Enum.Font.GothamSemibold
+		cName.Text = cat.Name
+		cName.TextColor3 = isCatNil and Color3.fromRGB(130, 150, 170) or Color3.fromRGB(160, 220, 255)
+		cName.TextSize = 9
+		cName.TextTruncate = Enum.TextTruncate.AtEnd
+		cName.TextXAlignment = Enum.TextXAlignment.Left
+		cName.Parent = cRow
+
+		local cBox = Instance.new("TextBox")
+		cBox.Size = UDim2.new(0.28, 0, 0, 18)
+		cBox.Position = UDim2.new(0.53, 0, 0, 2)
+		cBox.BackgroundColor3 = Color3.fromRGB(40, 45, 58)
+		cBox.BorderSizePixel = 0
+		cBox.Font = Enum.Font.GothamBold
+		cBox.Text = formatThresholdText(cat.MaxRatio)
+		cBox.TextColor3 = isCatNil and Color3.fromRGB(255, 130, 130) or Color3.fromRGB(255, 255, 255)
+		cBox.TextSize = 9
+		cBox.ClearTextOnFocus = false
+		cBox.Parent = cRow
+
+		local cbCorner = Instance.new("UICorner")
+		cbCorner.CornerRadius = UDim.new(0, 3)
+		cbCorner.Parent = cBox
+
+		cBox.FocusLost:Connect(function()
+			if not ActiveCustomCategories[idx] then return end
+			local raw = cBox.Text
+			if isNilThreshold(raw) then
+				ActiveCustomCategories[idx].MaxRatio = "nil"
+				cBox.Text = "nil"
+				cBox.TextColor3 = Color3.fromRGB(255, 130, 130)
+				cName.TextColor3 = Color3.fromRGB(130, 150, 170)
+				saveProfileData()
+				if not isPreviewingMode and LocalPlayer.Character then
+					lastPreset = ""
+					forceRecalculateHealthPreset(LocalPlayer.Character)
+				end
+				return
+			end
+
+			local parsed = tonumber(raw)
+			if parsed then
+				local clamped = normalizeThreshold(parsed, ActiveCustomCategories[idx].MaxRatio or 0.5)
+				ActiveCustomCategories[idx].MaxRatio = clamped
+				cBox.Text = formatThresholdText(clamped)
+				cBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+				cName.TextColor3 = Color3.fromRGB(160, 220, 255)
+				saveProfileData()
+				if not isPreviewingMode and LocalPlayer.Character then
+					lastPreset = ""
+					forceRecalculateHealthPreset(LocalPlayer.Character)
+				end
+			else
+				cBox.Text = formatThresholdText(ActiveCustomCategories[idx].MaxRatio)
+			end
+		end)
+
+		local delBtn = Instance.new("TextButton")
+		delBtn.Size = UDim2.new(0.16, 0, 0, 18)
+		delBtn.Position = UDim2.new(0.82, 0, 0, 2)
+		delBtn.BackgroundColor3 = Color3.fromRGB(150, 45, 45)
+		delBtn.BorderSizePixel = 0
+		delBtn.Font = Enum.Font.GothamBold
+		delBtn.Text = "X"
+		delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		delBtn.TextSize = 9
+		delBtn.Parent = cRow
+
+		local dbCorner = Instance.new("UICorner")
+		dbCorner.CornerRadius = UDim.new(0, 3)
+		dbCorner.Parent = delBtn
+
+		delBtn.Activated:Connect(function()
+			local removed = ActiveCustomCategories[idx]
+			table.remove(ActiveCustomCategories, idx)
+
+			if removed and removed.Name then
+				local folder = TargetPresetFolder:FindFirstChild(removed.Name)
+				if folder then folder:Destroy() end
+				CustomOffsets[removed.Name] = nil
+				AssetIdsToLoad[removed.Name] = nil
+				ExtractedNamesToLoad[removed.Name] = nil
+				ExtractedVisuals[removed.Name] = nil
+
+				if selectedTierName == removed.Name then
+					selectedTierName = Config.SelectedDefault
+					selectedItemName = ""
+					selectedSubPartName = "Handle"
+				end
+			end
+
+			saveProfileData()
+			drawSaveSlotsInterface()
+			updateTierUI()
+			updateItemUI()
+			updateEditorUI()
+			updateThresholdEditorUI()
+
+			if not isPreviewingMode and LocalPlayer.Character then
+				lastPreset = ""
+				forceRecalculateHealthPreset(LocalPlayer.Character)
+			end
+		end)
+	end
 end
 
 local InjectorFrame = Instance.new("Frame")
@@ -847,6 +1465,7 @@ injectAssetId = function(id, tierName, isSilentRestore)
 	if strId == "" then return false end
 	
 	tierName = tostring(tierName or Config.SelectedDefault)
+	ensureSubFolder(tierName)
 	local targetFolder = TargetPresetFolder:FindFirstChild(tierName)
 	if not targetFolder then return false end
 
@@ -1105,6 +1724,7 @@ ExtractBtn.Activated:Connect(function()
 	if not char then return end
 	local head = char:FindFirstChild("Head")
 	if not head then return end
+	ensureSubFolder(selectedTierName)
 	local targetFolder = TargetPresetFolder:FindFirstChild(selectedTierName)
 	if not targetFolder then return end
 
@@ -1326,17 +1946,23 @@ updateTierUI = function()
 	listLayout.Padding = UDim.new(0, 4)
 	listLayout.Parent = TierSelectionPanel
 	
-	local tiers = {
-		Config.SelectedDefault, Config.SelectedMinor, Config.SelectedMedium,
-		Config.SelectedMajor, Config.SelectedCritical
-	}
+	local tiers = getAllTierNames()
 
 	for _, tName in ipairs(tiers) do
+		ensureSubFolder(tName)
+		local isCustom = false
+		for _, cat in ipairs(ActiveCustomCategories) do
+			if cat.Name == tName then
+				isCustom = true
+				break
+			end
+		end
+
 		local tBtn = Instance.new("TextButton")
 		tBtn.Size = UDim2.new(1, 0, 0, 26)
-		tBtn.BackgroundColor3 = (tName == selectedTierName) and Color3.fromRGB(120, 80, 0) or Color3.fromRGB(35, 35, 40)
+		tBtn.BackgroundColor3 = (tName == selectedTierName) and Color3.fromRGB(120, 80, 0) or (isCustom and Color3.fromRGB(32, 46, 62) or Color3.fromRGB(35, 35, 40))
 		tBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		tBtn.Text = tName
+		tBtn.Text = isCustom and (tName .. " *") or tName
 		tBtn.Font = Enum.Font.GothamBold
 		tBtn.TextSize = 10
 		tBtn.Parent = TierSelectionPanel
@@ -1395,6 +2021,7 @@ end
 updateTierUI()
 updateItemUI()
 updateEditorUI()
+updateThresholdEditorUI()
 drawSaveSlotsInterface()
 restoreAllTierAssets()
 
@@ -1404,4 +2031,4 @@ LocalPlayer.CharacterAdded:Connect(monitorHealth)
 Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
-print("29xx")
+print("29xx02")
