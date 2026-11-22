@@ -1,4 +1,4 @@
--- Health-Based Face & Model Customizer (Robust Memory & JSON Fix + Exact Color/Texture Copy + Slot Thresholds & Custom Categories + "nil" HP Disable + Transparency + Duplicate Item Support)
+-- Health-Based Face & Model Customizer (Robust Memory & JSON Fix + Exact Color/Texture Copy + Slot Thresholds & Custom Categories + "nil" HP Disable + Transparency + Duplicate Item Support + Effects Tab)
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -89,6 +89,43 @@ local function normalizeTransparency(val, fallback)
 	return math.clamp(num, 0, 1)
 end
 
+-- Accepts either 0..255 or 0..1 and returns a normalized 0..1 channel value
+local function normalizeColorChannel(val, fallback)
+	local num = tonumber(val)
+	if not num then
+		num = tonumber(fallback)
+		if not num then return 1 end
+	end
+	if num > 1 then
+		num = num / 255
+	end
+	return math.clamp(num, 0, 1)
+end
+
+local function getPartInitialColor(part)
+	if typeof(part) == "Instance" and part:IsA("BasePart") then
+		local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
+		if mesh and mesh.VertexColor and mesh.VertexColor ~= Vector3.new(1, 1, 1) and mesh.VertexColor ~= Vector3.new(0, 0, 0) then
+			return math.clamp(mesh.VertexColor.X, 0, 1), math.clamp(mesh.VertexColor.Y, 0, 1), math.clamp(mesh.VertexColor.Z, 0, 1)
+		end
+		return part.Color.R, part.Color.G, part.Color.B
+	end
+	return 1, 1, 1
+end
+
+local function applyPartColor(part, rVal, gVal, bVal)
+	if typeof(part) ~= "Instance" or not part:IsA("BasePart") then return end
+	local r = normalizeColorChannel(rVal, part.Color.R)
+	local g = normalizeColorChannel(gVal, part.Color.G)
+	local b = normalizeColorChannel(bVal, part.Color.B)
+	part.Color = Color3.new(r, g, b)
+
+	local mesh = part:FindFirstChildWhichIsA("SpecialMesh")
+	if mesh and mesh.VertexColor and mesh.VertexColor ~= Vector3.new(1, 1, 1) then
+		mesh.VertexColor = Vector3.new(r, g, b)
+	end
+end
+
 local function getDefaultThresholdsCopy()
 	return {
 		[Config.SelectedMinor]    = DEFAULT_THRESHOLDS[Config.SelectedMinor],
@@ -112,7 +149,7 @@ local uniqueKeyCounter = 0
 local function generateUniqueItemKey(baseName)
 	uniqueKeyCounter = uniqueKeyCounter + 1
 	local cleanBase = (type(baseName) == "string" and baseName ~= "") and baseName or "Accessory"
-	return string.format("%s__#%d_%d", cleanBase, os.clock() * 1000 % 100000, uniqueKeyCounter)
+	return string.format("%s__#%d_%d", cleanBase, math.floor((os.clock() * 1000) % 100000), uniqueKeyCounter)
 end
 
 local function getItemKey(inst)
@@ -135,6 +172,7 @@ local lastPreset = ""
 local activeClientInstances = {}
 local isPreviewingMode = false 
 local isThresholdEditorOpen = false
+local isEffectsTabOpen = false
 
 local selectedTierName = Config.SelectedDefault
 local selectedItemKey = ""
@@ -340,10 +378,12 @@ local function initializeItemData(tierName, item, explicitKey)
 	
 	if handle then
 		handle.Name = "Handle"
+		local hR, hG, hB = getPartInitialColor(handle)
 		itemProfile["Handle"] = {
 			offsetX = 0, offsetY = 0, offsetZ = 0, 
 			rotateX = 0, rotateY = 0, rotateZ = 0, 
 			scaleX = 1, scaleY = 1, scaleZ = 1,
+			colorR = hR, colorG = hG, colorB = hB,
 			transparency = normalizeTransparency(handle.Transparency, 0)
 		}
 		
@@ -362,11 +402,14 @@ local function initializeItemData(tierName, item, explicitKey)
 				else
 					defaultX, defaultY, defaultZ = child.Size.X, child.Size.Y, child.Size.Z
 				end
+
+				local cR, cG, cB = getPartInitialColor(child)
 				
 				itemProfile[child.Name] = {
 					offsetX = 0, offsetY = 0, offsetZ = 0,
 					rotateX = 0, rotateY = 0, rotateZ = 0,
 					scaleX = defaultX, scaleY = defaultY, scaleZ = defaultZ,
+					colorR = cR, colorG = cG, colorB = cB,
 					transparency = normalizeTransparency(child.Transparency, 0)
 				}
 			end
@@ -466,6 +509,7 @@ local function localAttach(character, tierName, item)
 				else
 					obj.Size = Vector3.new(pData.scaleX or 1, pData.scaleY or 1, pData.scaleZ or 1)
 				end
+				applyPartColor(obj, pData.colorR, pData.colorG, pData.colorB)
 				obj.Transparency = normalizeTransparency(pData.transparency, obj.Transparency)
 			end
 		end
@@ -475,13 +519,14 @@ local function localAttach(character, tierName, item)
 	handle.CanCollide = false
 	handle.Massless = true
 
-	local rootData = itemData["Handle"] or { offsetX = 0, offsetY = 0, offsetZ = 0, rotateX = 0, rotateY = 0, rotateZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1, transparency = 0 }
+	local rootData = itemData["Handle"] or { offsetX = 0, offsetY = 0, offsetZ = 0, rotateX = 0, rotateY = 0, rotateZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1, colorR = handle.Color.R, colorG = handle.Color.G, colorB = handle.Color.B, transparency = 0 }
 	local rootMesh = handle:FindFirstChildWhichIsA("SpecialMesh")
 	if rootMesh then
 		rootMesh.Scale = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
 	else
 		handle.Size = Vector3.new(rootData.scaleX or 1, rootData.scaleY or 1, rootData.scaleZ or 1)
 	end
+	applyPartColor(handle, rootData.colorR, rootData.colorG, rootData.colorB)
 	handle.Transparency = normalizeTransparency(rootData.transparency, handle.Transparency)
 
 	for _, obj in ipairs(clone:GetDescendants()) do
@@ -1632,12 +1677,15 @@ compDropdownScroll.Parent = dropDownWrapper
 compSelectBtn.Activated:Connect(function() dropDownWrapper.Visible = not dropDownWrapper.Visible end)
 
 local inputs = {}
+local transformRows = {}
+local effectRows = {}
 
-local function createMatrixInput(labelText, property, orderingIndex, isTransparencyField)
+local function createEditorInput(labelText, property, orderingIndex, modeType)
 	local container = Instance.new("Frame")
 	container.Size = UDim2.new(1, 0, 0, 24)
 	container.BackgroundTransparency = 1
 	container.LayoutOrder = orderingIndex
+	container.Visible = (modeType == "transform")
 	container.Parent = EditorScroll
 
 	local label = Instance.new("TextLabel")
@@ -1656,7 +1704,7 @@ local function createMatrixInput(labelText, property, orderingIndex, isTranspare
 	textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 	textBox.BorderSizePixel = 0
 	textBox.Font = Enum.Font.Gotham
-	textBox.Text = isTransparencyField and "0.00" or "0"
+	textBox.Text = (property == "transparency") and "0.00" or "0"
 	textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 	textBox.TextSize = 11
 	textBox.ClearTextOnFocus = false
@@ -1671,14 +1719,19 @@ local function createMatrixInput(labelText, property, orderingIndex, isTranspare
 		if selectedItemKey == "" then return end
 		local tierData = CustomOffsets[selectedTierName]
 		if tierData and tierData[selectedItemKey] and tierData[selectedItemKey][selectedSubPartName] then
+			local pData = tierData[selectedItemKey][selectedSubPartName]
 			local val = tonumber(textBox.Text)
 			if val then
-				if isTransparencyField then
-					local clampedAlpha = normalizeTransparency(val, tierData[selectedItemKey][selectedSubPartName][property] or 0)
-					tierData[selectedItemKey][selectedSubPartName][property] = clampedAlpha
+				if property == "transparency" then
+					local clampedAlpha = normalizeTransparency(val, pData.transparency or 0)
+					pData.transparency = clampedAlpha
 					textBox.Text = string.format("%.2f", clampedAlpha)
+				elseif property == "colorR" or property == "colorG" or property == "colorB" then
+					local clampedChannel = normalizeColorChannel(val, pData[property] or 1)
+					pData[property] = clampedChannel
+					textBox.Text = tostring(math.floor(clampedChannel * 255 + 0.5))
 				else
-					tierData[selectedItemKey][selectedSubPartName][property] = val
+					pData[property] = val
 				end
 
 				if isPreviewingMode then
@@ -1687,25 +1740,40 @@ local function createMatrixInput(labelText, property, orderingIndex, isTranspare
 					applyPreset(LocalPlayer.Character, lastPreset)
 				end
 				saveProfileData()
-			elseif isTransparencyField then
-				textBox.Text = string.format("%.2f", normalizeTransparency(tierData[selectedItemKey][selectedSubPartName][property], 0))
+			else
+				if property == "transparency" then
+					textBox.Text = string.format("%.2f", normalizeTransparency(pData.transparency, 0))
+				elseif property == "colorR" or property == "colorG" or property == "colorB" then
+					textBox.Text = tostring(math.floor(normalizeColorChannel(pData[property], 1) * 255 + 0.5))
+				end
 			end
 		end
 	end)
 
 	inputs[property] = textBox
+	if modeType == "effect" then
+		table.insert(effectRows, container)
+	else
+		table.insert(transformRows, container)
+	end
 end
 
-createMatrixInput("Offset X:",       "offsetX",      10, false)
-createMatrixInput("Offset Y:",       "offsetY",      11, false)
-createMatrixInput("Offset Z:",       "offsetZ",      12, false)
-createMatrixInput("Rotate X:",       "rotateX",      13, false)
-createMatrixInput("Rotate Y:",       "rotateY",      14, false)
-createMatrixInput("Rotate Z:",       "rotateZ",      15, false)
-createMatrixInput("Scale X:",        "scaleX",       16, false)
-createMatrixInput("Scale Y:",        "scaleY",       17, false)
-createMatrixInput("Scale Z:",        "scaleZ",       18, false)
-createMatrixInput("Transparency:", "transparency", 19, true)
+-- Transform fields
+createEditorInput("Offset X:", "offsetX", 10, "transform")
+createEditorInput("Offset Y:", "offsetY", 11, "transform")
+createEditorInput("Offset Z:", "offsetZ", 12, "transform")
+createEditorInput("Rotate X:", "rotateX", 13, "transform")
+createEditorInput("Rotate Y:", "rotateY", 14, "transform")
+createEditorInput("Rotate Z:", "rotateZ", 15, "transform")
+createEditorInput("Scale X:",  "scaleX",  16, "transform")
+createEditorInput("Scale Y:",  "scaleY",  17, "transform")
+createEditorInput("Scale Z:",  "scaleZ",  18, "transform")
+
+-- Effects fields (R, G, B, Transparency)
+createEditorInput("Red (0-255):",  "colorR",       20, "effect")
+createEditorInput("Green (0-255):", "colorG",       21, "effect")
+createEditorInput("Blue (0-255):",  "colorB",       22, "effect")
+createEditorInput("Transparency:", "transparency", 23, "effect")
 
 local ExtractBtn = Instance.new("TextButton")
 ExtractBtn.Size = UDim2.new(1, 0, 0, 26)
@@ -1734,6 +1802,43 @@ DeleteItemBtn.Parent = EditorScroll
 local DeleteBtnCorner = Instance.new("UICorner")
 DeleteBtnCorner.CornerRadius = UDim.new(0, 4)
 DeleteBtnCorner.Parent = DeleteItemBtn
+
+local EffectsTabBtn = Instance.new("TextButton")
+EffectsTabBtn.Name = "EffectsTabButton"
+EffectsTabBtn.Size = UDim2.new(1, 0, 0, 26)
+EffectsTabBtn.BackgroundColor3 = Color3.fromRGB(65, 45, 95)
+EffectsTabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+EffectsTabBtn.Text = "Effects"
+EffectsTabBtn.Font = Enum.Font.GothamBold
+EffectsTabBtn.TextSize = 10
+EffectsTabBtn.LayoutOrder = 52
+EffectsTabBtn.Parent = EditorScroll
+
+local EffectsTabCorner = Instance.new("UICorner")
+EffectsTabCorner.CornerRadius = UDim.new(0, 4)
+EffectsTabCorner.Parent = EffectsTabBtn
+
+local function refreshEditorTabVisibility()
+	for _, row in ipairs(transformRows) do
+		row.Visible = not isEffectsTabOpen
+	end
+	for _, row in ipairs(effectRows) do
+		row.Visible = isEffectsTabOpen
+	end
+	if isEffectsTabOpen then
+		EffectsTabBtn.Text = "Effects (ON)"
+		EffectsTabBtn.BackgroundColor3 = Color3.fromRGB(115, 65, 165)
+	else
+		EffectsTabBtn.Text = "Effects"
+		EffectsTabBtn.BackgroundColor3 = Color3.fromRGB(65, 45, 95)
+	end
+end
+
+EffectsTabBtn.Activated:Connect(function()
+	isEffectsTabOpen = not isEffectsTabOpen
+	refreshEditorTabVisibility()
+	updateEditorUI()
+end)
 
 DeleteItemBtn.Activated:Connect(function()
 	if selectedItemKey == "" then return end
@@ -1885,12 +1990,15 @@ ExtractBtn.Activated:Connect(function()
 				else
 					scaleX, scaleY, scaleZ = handle.Size.X, handle.Size.Y, handle.Size.Z
 				end
+
+				local hR, hG, hB = getPartInitialColor(handle)
 				
 				if CustomOffsets[selectedTierName] and CustomOffsets[selectedTierName][entryKey] then
 					CustomOffsets[selectedTierName][entryKey]["Handle"] = {
 						offsetX = offsetX, offsetY = offsetY, offsetZ = offsetZ,
 						rotateX = rotX, rotateY = rotY, rotateZ = rotZ,
 						scaleX = scaleX, scaleY = scaleY, scaleZ = scaleZ,
+						colorR = hR, colorG = hG, colorB = hB,
 						transparency = normalizeTransparency(handle.Transparency, 0)
 					}
 				end
@@ -1920,6 +2028,7 @@ ExtractBtn.Activated:Connect(function()
 end)
 
 updateEditorUI = function()
+	refreshEditorTabVisibility()
 	if selectedItemKey == "" then
 		compSelectBtn.Text = "No Item Selected"
 		for _, box in pairs(inputs) do box.Text = "" end
@@ -1975,6 +2084,9 @@ updateEditorUI = function()
 		inputs["scaleX"].Text  = tostring(pData.scaleX or 1)
 		inputs["scaleY"].Text  = tostring(pData.scaleY or 1)
 		inputs["scaleZ"].Text  = tostring(pData.scaleZ or 1)
+		inputs["colorR"].Text  = tostring(math.floor(normalizeColorChannel(pData.colorR, 1) * 255 + 0.5))
+		inputs["colorG"].Text  = tostring(math.floor(normalizeColorChannel(pData.colorG, 1) * 255 + 0.5))
+		inputs["colorB"].Text  = tostring(math.floor(normalizeColorChannel(pData.colorB, 1) * 255 + 0.5))
 		inputs["transparency"].Text = string.format("%.2f", normalizeTransparency(pData.transparency, 0))
 	end
 end
@@ -2149,4 +2261,4 @@ LocalPlayer.CharacterAdded:Connect(monitorHealth)
 Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
-print("UPDATE")
+print("29xx")
