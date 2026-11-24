@@ -89,7 +89,6 @@ local function normalizeTransparency(val, fallback)
 	return math.clamp(num, 0, 1)
 end
 
--- Accepts either 0..255 or 0..1 and returns a normalized 0..1 channel value
 local function normalizeColorChannel(val, fallback)
 	local num = tonumber(val)
 	if not num then
@@ -145,11 +144,11 @@ local ActiveThresholds = getDefaultThresholdsCopy()
 local ActiveCustomCategories = {}
 local activeSlotKey = nil
 
-local uniqueKeyCounter = 0
+local instanceSeqCounter = 0
 local function generateUniqueItemKey(baseName)
-	uniqueKeyCounter = uniqueKeyCounter + 1
-	local cleanBase = (type(baseName) == "string" and baseName ~= "") and baseName or "Accessory"
-	return string.format("%s__#%d_%d", cleanBase, math.floor((os.clock() * 1000) % 100000), uniqueKeyCounter)
+	instanceSeqCounter = instanceSeqCounter + 1
+	local cleanBase = (type(baseName) == "string" and baseName ~= "") and baseName or "Item"
+	return string.format("%s__inst_%d_%d", cleanBase, math.floor(os.clock() * 10000), instanceSeqCounter)
 end
 
 local function getItemKey(inst)
@@ -1563,7 +1562,7 @@ injectAssetId = function(id, tierName, isSilentRestore, explicitKey)
 	
 	if (not success or typeof(assetModel) ~= "Instance") and type(ExtractedVisuals[tierName]) == "table" then
 		for entryKey, parts in pairs(ExtractedVisuals[tierName]) do
-			if type(parts) == "table" then
+			if type(parts) == "table" and (not explicitKey or entryKey == explicitKey) then
 				local match = false
 				for partName, visualData in pairs(parts) do
 					if type(visualData) == "table" then
@@ -1578,7 +1577,7 @@ injectAssetId = function(id, tierName, isSilentRestore, explicitKey)
 				end
 				
 				if match then
-					local cleanName = string.match(entryKey, "^(.-)__#%d+_%d+$") or entryKey
+					local cleanName = string.match(entryKey, "^(.-)__inst_%d+_%d+$") or entryKey
 					assetModel = generateExtractedPlaceholderModel(tierName, cleanName, entryKey)
 					if typeof(assetModel) == "Instance" then
 						success = true
@@ -1758,7 +1757,6 @@ local function createEditorInput(labelText, property, orderingIndex, modeType)
 	end
 end
 
--- Transform fields
 createEditorInput("Offset X:", "offsetX", 10, "transform")
 createEditorInput("Offset Y:", "offsetY", 11, "transform")
 createEditorInput("Offset Z:", "offsetZ", 12, "transform")
@@ -1769,11 +1767,10 @@ createEditorInput("Scale X:",  "scaleX",  16, "transform")
 createEditorInput("Scale Y:",  "scaleY",  17, "transform")
 createEditorInput("Scale Z:",  "scaleZ",  18, "transform")
 
--- Effects fields (R, G, B, Transparency)
-createEditorInput("Red (0-255):",  "colorR",       20, "effect")
+createEditorInput("Red (0-255):",   "colorR",       20, "effect")
 createEditorInput("Green (0-255):", "colorG",       21, "effect")
 createEditorInput("Blue (0-255):",  "colorB",       22, "effect")
-createEditorInput("Transparency:", "transparency", 23, "effect")
+createEditorInput("Transparency:",  "transparency", 23, "effect")
 
 local ExtractBtn = Instance.new("TextButton")
 ExtractBtn.Size = UDim2.new(1, 0, 0, 26)
@@ -2261,4 +2258,4 @@ LocalPlayer.CharacterAdded:Connect(monitorHealth)
 Players.PlayerRemoving:Connect(function(player)
 	if player == LocalPlayer then saveProfileData() end
 end)
-print("29xx")
+print("2993xx")
